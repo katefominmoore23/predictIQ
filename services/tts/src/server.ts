@@ -75,6 +75,19 @@ const healthChecker = new HealthChecker(config, service);
 const app: Express = express();
 const port = process.env.PORT || 3000;
 
+// Security headers — applied to every response (JSON error bodies included).
+// Mirrors services/api/src/security.rs's security_headers_middleware.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'none'; frame-ancestors 'none'",
+  );
+  next();
+});
+
 // Middleware
 app.use(express.json());
 
@@ -219,7 +232,8 @@ app.post("/tts/enqueue", (req: Request, res: Response) => {
  * }
  */
 app.get("/tts/job/:id", (req: Request, res: Response) => {
-  const job = service.getJob(req.params.id);
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const job = service.getJob(id);
   if (!job) {
     return res.status(404).json({ error: "Job not found" });
   }
@@ -322,12 +336,15 @@ app.use((err: any, req: Request, res: Response, next: any) => {
 // Server startup
 // ---------------------------------------------------------------------------
 
-app.listen(port, () => {
-  console.log(`🎙️  TTS Service listening on port ${port}`);
-  console.log(`📊 Health check: GET http://localhost:${port}/health`);
-  console.log(`🔍 Readiness probe: GET http://localhost:${port}/health/ready`);
-  console.log(`💓 Liveness probe: GET http://localhost:${port}/health/live`);
-  console.log(`🎵 TTS endpoints: POST http://localhost:${port}/tts/enqueue`);
-});
+// Only bind a real listener when run directly (not when imported, e.g. by tests).
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`🎙️  TTS Service listening on port ${port}`);
+    console.log(`📊 Health check: GET http://localhost:${port}/health`);
+    console.log(`🔍 Readiness probe: GET http://localhost:${port}/health/ready`);
+    console.log(`💓 Liveness probe: GET http://localhost:${port}/health/live`);
+    console.log(`🎵 TTS endpoints: POST http://localhost:${port}/tts/enqueue`);
+  });
+}
 
 export default app;
