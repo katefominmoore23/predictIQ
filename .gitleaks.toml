@@ -44,8 +44,10 @@ paths = [
 
 regexes = [
   '''example\.com''',
-  '''localhost''',
-  '''127\.0\.0\.1''',
+  '''^localhost$''',
+  '''^127\.0\.0\.1$''',
+  '''^postgres(ql)?://(?:postgres|user|admin|root|example):(?:password|pass|postgres|example|secret)@(?:localhost|127\.0\.0\.1)(?::[0-9]+)?/[A-Za-z0-9_-]+$''',
+  '''^redis://(?:postgres|user|admin|root|example):(?:password|pass|postgres|example|secret)@(?:localhost|127\.0\.0\.1):[0-9]+$''',
   '''GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX''',
   '''SXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX''',
 ]
