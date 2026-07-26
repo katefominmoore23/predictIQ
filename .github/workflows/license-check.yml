@@ -10,6 +10,7 @@ jobs:
   rust-licenses-contracts:
     name: Rust License Check — contracts/predict-iq
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +35,7 @@ jobs:
   rust-licenses-api:
     name: Rust License Check — services/api
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +60,7 @@ jobs:
   npm-licenses-frontend:
     name: NPM License Check — frontend
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -89,6 +92,7 @@ jobs:
   npm-licenses-tts:
     name: NPM License Check — services/tts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -125,6 +129,7 @@ jobs:
       - npm-licenses-frontend
       - npm-licenses-tts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Success
         run: echo "All dependency licenses are compliant."

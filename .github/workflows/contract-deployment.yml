@@ -25,6 +25,7 @@ jobs:
   build-and-test:
     name: Build and Test Contracts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       wasm-path: ${{ steps.build.outputs.wasm-path }}
       contract-hash: ${{ steps.build.outputs.contract-hash }}
@@ -116,6 +117,7 @@ jobs:
     name: Deploy to Testnet
     needs: build-and-test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.ref == 'refs/heads/develop' || github.event.inputs.environment == 'testnet'
     environment:
       name: testnet
@@ -183,6 +185,7 @@ jobs:
     name: Deploy to Mainnet
     needs: build-and-test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.ref == 'refs/heads/main'
     environment:
       name: mainnet
@@ -255,6 +258,7 @@ jobs:
     name: Version and Archive Artifacts
     needs: build-and-test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -291,6 +295,7 @@ jobs:
     name: Notify Deployment Status
     needs: [build-and-test, deploy-testnet]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: always()
     steps:
       - name: Determine deployment status

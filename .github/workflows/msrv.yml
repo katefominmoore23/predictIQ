@@ -16,6 +16,7 @@ jobs:
   msrv:
     name: Build with Minimum Supported Rust Version
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

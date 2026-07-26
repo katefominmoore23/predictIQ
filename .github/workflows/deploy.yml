@@ -19,6 +19,7 @@ jobs:
   validate-secrets:
     name: Validate Required Secrets
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check required secrets are set
         run: |
@@ -53,6 +54,7 @@ jobs:
   security-scan:
     name: Checkov Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: validate-secrets
     steps:
       - uses: actions/checkout@v4
@@ -73,6 +75,7 @@ jobs:
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [validate-secrets, security-scan]
     strategy:
       matrix:
@@ -126,6 +129,9 @@ jobs:
   apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
+    # Kept short: this job holds a DynamoDB state lock and max-parallel: 1
+    # means a hung apply blocks every other environment behind it.
+    timeout-minutes: 15
     needs: plan
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:

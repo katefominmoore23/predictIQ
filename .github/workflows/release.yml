@@ -13,6 +13,7 @@ jobs:
   validate-release:
     name: Validate Release Tag
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,6 +39,7 @@ jobs:
   changelog:
     name: Generate Changelog & Release
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: validate-release
     steps:
       - uses: actions/checkout@v4
@@ -90,6 +92,7 @@ jobs:
   build-and-publish-wasm:
     name: Build & Publish WASM Artifact
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: validate-release
     steps:
       - uses: actions/checkout@v4

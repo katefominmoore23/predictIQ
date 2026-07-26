@@ -21,6 +21,7 @@ jobs:
   prometheus-rules-test:
     name: Prometheus SLO Rules Testing
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +43,7 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -81,6 +83,7 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -106,6 +109,7 @@ jobs:
   api-rate-limit-tests:
     name: API Rate Limiting Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -128,6 +132,7 @@ jobs:
   gas-benchmarks:
     name: Gas Benchmarks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -196,6 +201,7 @@ jobs:
   save-gas-baseline:
     name: Save Gas Benchmark Baseline
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [gas-benchmarks]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
@@ -253,6 +259,7 @@ jobs:
   backend-coverage:
     name: Backend coverage (contracts + API)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -318,6 +325,9 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    # cargo install cargo-audit has hung indefinitely on runner network
+    # issues before; keep this shorter than the default 20.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -338,6 +348,7 @@ jobs:
   sast-scanning:
     name: SAST Security Scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       security-events: write
       contents: read
@@ -374,6 +385,7 @@ jobs:
   secrets-scanning:
     name: Secrets Scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -396,6 +408,7 @@ jobs:
   dependency-scanning:
     name: Dependency Vulnerability Scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -434,6 +447,7 @@ jobs:
   container-scanning:
     name: Container Image Scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -483,6 +497,7 @@ jobs:
   codeql-analysis:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       security-events: write
       contents: read
@@ -517,6 +532,7 @@ jobs:
   clippy:
     name: Clippy Lints
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -531,6 +547,7 @@ jobs:
   oracle-quality-gate:
     name: Oracle Module — Clippy + Warnings-as-Errors
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -561,6 +578,7 @@ jobs:
   format:
     name: Code Formatting
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -575,6 +593,7 @@ jobs:
   build-optimized:
     name: Build Optimized Contract
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -615,6 +634,7 @@ jobs:
   contract-fuzz:
     name: Contract Fuzz Tests (libFuzzer, 60 s per target)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -645,6 +665,7 @@ jobs:
   api-cache-tests:
     name: API Cache Tests (Redis)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -667,6 +688,7 @@ jobs:
   e2e-market-creation:
     name: E2E — Market Creation Flow
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -709,6 +731,7 @@ jobs:
   e2e-mocked:
     name: E2E — Mocked (no backend)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -752,6 +775,7 @@ jobs:
   e2e-visual-regression:
     name: E2E — Visual Regression (Docker)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -786,6 +810,7 @@ jobs:
   bundle-size:
     name: Bundle Size Budget
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -816,6 +841,7 @@ jobs:
   validate-migration-rollbacks:
     name: Validate Migration Rollback Scripts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -865,6 +891,7 @@ jobs:
   rollback-idempotency:
     name: Rollback Idempotency Check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -916,6 +943,7 @@ jobs:
   api-criterion-benchmarks:
     name: API Criterion Benchmarks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -977,6 +1005,7 @@ jobs:
   save-api-bench-baseline:
     name: Save API Benchmark Baseline
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [api-criterion-benchmarks]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -1036,6 +1065,7 @@ jobs:
   frontend-unit-coverage:
     name: Frontend Unit Test Coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -1069,6 +1099,7 @@ jobs:
   api-integration-tests:
     name: API Integration Tests (Compose)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -1103,6 +1134,7 @@ jobs:
   api-test-order-independence:
     name: API Tests — Order Independence
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -1133,6 +1165,7 @@ jobs:
   api-property-tests:
     name: API Property-Based Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -1157,6 +1190,7 @@ jobs:
   openapi-drift-check:
     name: OpenAPI Spec Drift Check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -1231,6 +1265,7 @@ jobs:
   schema-drift-check:
     name: Schema Drift Detection
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -1340,6 +1375,7 @@ jobs:
       - api-property-tests
       - schema-drift-check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Success
         run: echo "All tests passed successfully!"
@@ -1347,6 +1383,7 @@ jobs:
   documentation-sync:
     name: Documentation Sync Check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

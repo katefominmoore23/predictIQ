@@ -12,6 +12,9 @@ jobs:
   scan-rust:
     name: Scan Rust Dependencies
     runs-on: ubuntu-latest
+    # cargo install cargo-audit has hung indefinitely on runner network
+    # issues before; keep this shorter than the default 20.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +61,7 @@ jobs:
   scan-npm:
     name: Scan NPM Dependencies
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -98,6 +102,7 @@ jobs:
   scan-trivy:
     name: Scan with Trivy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -120,6 +125,7 @@ jobs:
   report-vulnerabilities:
     name: Report Vulnerabilities
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [scan-rust, scan-npm, scan-trivy]
     if: always()
     steps:

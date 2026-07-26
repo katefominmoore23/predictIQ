@@ -18,6 +18,7 @@ jobs:
   terraform-fmt:
     name: Terraform Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +52,7 @@ jobs:
   terraform-validate:
     name: Terraform Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         environment: [dev, staging, production]
@@ -73,6 +75,7 @@ jobs:
   terraform-plan:
     name: Terraform Plan (${{ matrix.environment }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [terraform-fmt, terraform-validate]
     strategy:
       matrix:
@@ -199,6 +202,7 @@ jobs:
     name: All Terraform Checks Passed
     needs: [terraform-fmt, terraform-validate, terraform-plan]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Success
         run: echo "Terraform fmt, validate, and plan all passed."

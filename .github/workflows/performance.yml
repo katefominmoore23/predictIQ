@@ -17,6 +17,7 @@ jobs:
   backend-performance:
     name: Backend Performance Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -222,6 +223,7 @@ jobs:
   contract-benchmarks:
     name: Smart Contract Benchmarks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -270,6 +272,7 @@ jobs:
   performance-regression:
     name: Performance Regression Detection
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [backend-performance]
     if: github.event_name == 'pull_request'
 
@@ -339,6 +342,7 @@ jobs:
   save-performance-baseline:
     name: Save Performance Baseline
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [backend-performance]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
