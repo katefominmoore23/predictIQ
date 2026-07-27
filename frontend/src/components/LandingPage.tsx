@@ -2,7 +2,7 @@ import React from 'react';
 import { useI18n } from '../lib/hooks/useI18n';
 import { useDarkMode } from '../lib/hooks/useDarkMode';
 import { type Locale } from '../lib/i18n';
-import { api } from '../lib/api/client';
+import { api } from '../lib/api/public-client';
 import { Statistics } from './Statistics';
 import { ErrorBoundary } from './ErrorBoundary';
 import { LoadingSpinner } from './LoadingSpinner';

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAsync } from '../lib/hooks/useAsync';
-import { api } from '../lib/api/client';
+import { api } from '../lib/api/public-client';
 import { LoadingSpinner } from './LoadingSpinner';
 import { Skeleton } from './Skeleton';
 import './Statistics.css';
