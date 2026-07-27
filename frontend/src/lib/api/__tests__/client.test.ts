@@ -598,6 +598,79 @@ describe('API Client', () => {
     });
   });
 
+  describe('URI encoding of path parameters (#1157)', () => {
+    const mockOk = (data: unknown = { ok: true }) =>
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: async () => JSON.stringify(data),
+      });
+
+    const base = 'http://localhost:3001';
+
+    it('getBlockchainMarket encodes a slash in marketId', async () => {
+      mockOk();
+      await api.getBlockchainMarket('foo/bar');
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/blockchain/markets/foo%2Fbar`,
+        expect.any(Object),
+      );
+    });
+
+    it('getUserBets encodes a slash in user address', async () => {
+      mockOk();
+      await api.getUserBets('GA/BC');
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/blockchain/users/GA%2FBC/bets'),
+        expect.any(Object),
+      );
+    });
+
+    it('getOracleResult encodes special characters in marketId', async () => {
+      mockOk();
+      await api.getOracleResult('a/b?c#d');
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/blockchain/oracle/a%2Fb%3Fc%23d`,
+        expect.any(Object),
+      );
+    });
+
+    it('getTransactionStatus encodes a slash in txHash', async () => {
+      mockOk();
+      await api.getTransactionStatus('0x/dead');
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/blockchain/tx/0x%2Fdead`,
+        expect.any(Object),
+      );
+    });
+
+    it('resolveMarket encodes a slash in marketId', async () => {
+      mockOk();
+      await api.resolveMarket('10/20');
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/markets/10%2F20/resolve`,
+        expect.any(Object),
+      );
+    });
+
+    it('emailPreview encodes a slash in templateName', async () => {
+      mockOk();
+      await api.emailPreview('welcome/v2');
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/v1/email/preview/welcome%2Fv2`,
+        expect.any(Object),
+      );
+    });
+
+    it('plain values without special characters are unchanged', async () => {
+      mockOk();
+      await api.getBlockchainMarket(42);
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/blockchain/markets/42`,
+        expect.any(Object),
+      );
+    });
+  });
+
   describe('DELETE requests', () => {
     it('should handle DELETE requests with body', async () => {
       const mockResponse = { success: true };
