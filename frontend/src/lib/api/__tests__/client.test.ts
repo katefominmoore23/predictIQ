@@ -52,7 +52,33 @@ describe('API Client', () => {
     });
   });
 
-  describe('Successful responses', () => {
+  describe('Path parameter URI encoding', () => {
+     const mockOk = (data: unknown = { ok: true }) =>
+       (global.fetch as jest.Mock).mockResolvedValue({
+         ok: true,
+         text: async () => JSON.stringify(data),
+       });
+
+     it('encodes path parameters containing special characters (/, ?, #)', async () => {
+       mockOk();
+       await api.getBlockchainMarket('foo/bar');
+       expect(global.fetch).toHaveBeenCalledWith(
+         expect.stringContaining('/api/blockchain/markets/foo%2Fbar'),
+         expect.any(Object),
+       );
+     });
+
+     it('encodes user path parameter containing a slash', async () => {
+       mockOk();
+       await api.getUserBets('user/name');
+       expect(global.fetch).toHaveBeenCalledWith(
+         expect.stringContaining('/api/blockchain/users/user%2Fname/bets'),
+         expect.any(Object),
+       );
+     });
+   });
+
+   describe('Successful responses', () => {
     it('should handle successful GET requests', async () => {
       const mockData = { status: 'ok' };
       (global.fetch as jest.Mock).mockResolvedValueOnce({
