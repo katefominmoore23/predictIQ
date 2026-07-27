@@ -35,7 +35,7 @@ describe('API Client', () => {
       ['getTransactionStatus', () => api.getTransactionStatus('0xdead'), 'GET', '/api/blockchain/tx/0xdead'],
       ['newsletterConfirm', () => api.newsletterConfirm('tok'), 'GET', '/api/v1/newsletter/confirm'],
       ['newsletterUnsubscribe', () => api.newsletterUnsubscribe('a@b.com'), 'DELETE', '/api/v1/newsletter/unsubscribe'],
-      ['newsletterGdprExport', () => api.newsletterGdprExport('a@b.com'), 'GET', '/api/v1/newsletter/gdpr/export'],
+      ['newsletterGdprExport', () => api.newsletterGdprExport('a@b.com'), 'POST', '/api/v1/newsletter/gdpr/export'],
       ['newsletterGdprDelete', () => api.newsletterGdprDelete('a@b.com'), 'DELETE', '/api/v1/newsletter/gdpr/delete'],
       ['resolveMarket', () => api.resolveMarket(3), 'POST', '/api/markets/3/resolve'],
       ['emailPreview', () => api.emailPreview('welcome'), 'GET', '/api/v1/email/preview/welcome'],
@@ -548,6 +548,27 @@ describe('API Client', () => {
       });
       const second = await api.getFeaturedMarkets();
       expect(second).toEqual([{ id: 1, title: 'Resolved Market' }]);
+    });
+  });
+
+  describe('GDPR export (#1156)', () => {
+    it('sends email in the POST request body, not as a URL query parameter', async () => {
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ success: true, data: {} }),
+      });
+
+      await api.newsletterGdprExport('user@example.com');
+
+      const [calledUrl, calledInit] = (global.fetch as jest.Mock).mock.calls[0];
+
+      // Email must NOT appear in the URL to prevent logging PII in access logs.
+      expect(calledUrl).not.toContain('user@example.com');
+      expect(calledUrl).not.toContain('email=');
+
+      // Email MUST be in the JSON body.
+      expect(calledInit.method).toBe('POST');
+      expect(JSON.parse(calledInit.body as string)).toEqual({ email: 'user@example.com' });
     });
   });
 

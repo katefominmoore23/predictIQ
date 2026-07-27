@@ -448,9 +448,9 @@ export const api = {
 
   newsletterGdprExport: (email: string, signal?: AbortSignal) =>
     request<{ success: boolean; data: Record<string, unknown> }>(
-      "GET",
+      "POST",
       "/api/v1/newsletter/gdpr/export",
-      { params: { email }, cacheTags: [CacheTag.NEWSLETTER], signal }
+      { body: { email }, cacheTags: [CacheTag.NEWSLETTER], signal }
     ),
 
   newsletterGdprDelete: (email: string, signal?: AbortSignal) =>
