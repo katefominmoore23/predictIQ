@@ -130,6 +130,13 @@ const ttsRateLimiter = rateLimit({
 });
 app.use(ttsRateLimiter);
 
+/** Extract the bearer credential from the Authorization header, if present. */
+function extractCredential(req: Request): string | undefined {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return undefined;
+  return authHeader.replace(/^Bearer\s+/i, "");
+}
+
 // Issue #723: Authentication middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   // Skip auth for health checks
@@ -138,12 +145,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   }
 
   if (config.auth) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const credential = extractCredential(req);
+    if (!credential) {
       return res.status(401).json({ error: "Missing Authorization header" });
     }
 
-    const credential = authHeader.replace(/^Bearer\s+/i, "");
     try {
       const { authenticate } = require("./TTSService");
       authenticate(credential, config.auth);
@@ -224,7 +230,8 @@ app.post("/tts/enqueue", (req: Request, res: Response) => {
       return res.status(400).json({ error: `Unknown voice: ${voiceId}` });
     }
 
-    const jobId = service.enqueue(text, voice, provider, undefined, rateLimitKey, bypassCache);
+    const credential = extractCredential(req);
+    const jobId = service.enqueue(text, voice, provider, credential, rateLimitKey, bypassCache);
     res.json({ jobId, status: "pending" });
   } catch (error: any) {
     const statusCode = error.statusCode || 500;
@@ -247,11 +254,19 @@ app.post("/tts/enqueue", (req: Request, res: Response) => {
  * }
  */
 app.get("/tts/job/:id", (req: Request, res: Response) => {
-  const job = service.getJob(req.params.id);
-  if (!job) {
-    return res.status(404).json({ error: "Job not found" });
+  try {
+    const credential = extractCredential(req);
+    const job = service.getJob(req.params.id, credential);
+    if (!job) {
+      // Same response whether the job doesn't exist or belongs to another
+      // tenant, so a credential can't distinguish the two by probing IDs.
+      return res.status(404).json({ error: "Job not found" });
+    }
+    res.json(job);
+  } catch (error: any) {
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({ error: error.message });
   }
-  res.json(job);
 });
 
 /**
@@ -268,9 +283,15 @@ app.get("/tts/job/:id", (req: Request, res: Response) => {
  * ]
  */
 app.get("/tts/jobs", (req: Request, res: Response) => {
-  const status = req.query.status as any;
-  const jobs = service.listJobs(status);
-  res.json(jobs);
+  try {
+    const status = req.query.status as any;
+    const credential = extractCredential(req);
+    const jobs = service.listJobs(status, credential);
+    res.json(jobs);
+  } catch (error: any) {
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({ error: error.message });
+  }
 });
 
 /**
@@ -308,11 +329,12 @@ app.post("/tts/generate", async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Unknown voice: ${voiceId}` });
     }
 
+    const credential = extractCredential(req);
     const outputPath = await service.generate(
       text,
       voice,
       provider,
-      undefined,
+      credential,
       rateLimitKey,
       bypassCache,
     );

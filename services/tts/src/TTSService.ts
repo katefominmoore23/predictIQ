@@ -46,7 +46,17 @@ export interface TTSJob {
   createdAt: Date;
   updatedAt: Date;
   bypassCache?: boolean;
+  /**
+   * Identity of the credential that created this job (the API key itself,
+   * or the JWT `sub` claim). Used to enforce per-tenant access on
+   * getJob/listJobs so one credential cannot read another's jobs.
+   * `ANONYMOUS_OWNER` when no auth is configured (single-tenant deployment).
+   */
+  owner: string;
 }
+
+/** Owner tag used for jobs created when no auth is configured. */
+export const ANONYMOUS_OWNER = "anonymous";
 
 // ---------------------------------------------------------------------------
 // Rate limiting (issue #531)
@@ -404,12 +414,18 @@ export class AuthError extends Error {
   }
 }
 
-export function authenticate(credential: string | undefined, auth: AuthConfig): void {
+/**
+ * Verify `credential` against `auth` and return a stable tenant identity for it:
+ * - API key auth: the key itself is the tenant boundary.
+ * - JWT auth: the `sub` claim if present, otherwise the raw credential.
+ * Throws `AuthError` if the credential is missing or invalid.
+ */
+export function authenticate(credential: string | undefined, auth: AuthConfig): string {
   if (!credential) throw new AuthError("Missing credential");
 
   if (auth.type === "apikey") {
     if (!auth.keys.includes(credential)) throw new AuthError("Invalid API key");
-    return;
+    return credential;
   }
 
   const parts = credential.split(".");
@@ -427,6 +443,8 @@ export function authenticate(credential: string | undefined, auth: AuthConfig): 
   if (payload.exp !== undefined && payload.exp < Math.floor(Date.now() / 1000)) {
     throw new AuthError("JWT expired");
   }
+
+  return typeof payload.sub === "string" && payload.sub ? payload.sub : credential;
 }
 
 // ---------------------------------------------------------------------------
@@ -725,7 +743,7 @@ export class TTSService {
     rateLimitKey?: string,
     bypassCache?: boolean
   ): string {
-    if (this.config.auth) authenticate(credential, this.config.auth);
+    const owner = this._resolveOwner(credential);
 
     // Rate limiting
     if (this.rateLimiter && rateLimitKey) {
@@ -745,6 +763,7 @@ export class TTSService {
       createdAt: new Date(),
       updatedAt: new Date(),
       bypassCache: bypassCache || false,
+      owner,
     };
     jobStore.set(id, job);
 
@@ -761,11 +780,43 @@ export class TTSService {
     return id;
   }
 
-  getJob(id: string): TTSJob | undefined {
-    return jobStore.get(id);
+  /**
+   * Resolve `credential` to a stable tenant identity, enforcing auth if
+   * configured. Used both to tag newly created jobs with their owner and to
+   * check ownership on lookup, so the two paths can never disagree.
+   */
+  private _resolveOwner(credential?: string): string {
+    if (!this.config.auth) return ANONYMOUS_OWNER;
+    return authenticate(credential, this.config.auth);
   }
 
-  listJobs(status?: TTSJob["status"]): TTSJob[] {
+  /**
+   * Look up a job by ID, scoped to the requesting credential's tenant.
+   * Returns `undefined` both when the job doesn't exist and when it exists
+   * but belongs to a different tenant — the two cases are indistinguishable
+   * to the caller so a credential cannot probe for other tenants' job IDs.
+   */
+  getJob(id: string, credential?: string): TTSJob | undefined {
+    const owner = this._resolveOwner(credential);
+    const job = jobStore.get(id);
+    if (!job || job.owner !== owner) return undefined;
+    return job;
+  }
+
+  /** List jobs belonging to the requesting credential's tenant, optionally filtered by status. */
+  listJobs(status?: TTSJob["status"], credential?: string): TTSJob[] {
+    const owner = this._resolveOwner(credential);
+    const all = Array.from(jobStore.values()).filter((j) => j.owner === owner);
+    return status ? all.filter((j) => j.status === status) : all;
+  }
+
+  /**
+   * Returns jobs across *all* tenants, optionally filtered by status.
+   * For internal operational use only (health checks, queue-depth metrics)
+   * — never expose this over a tenant-facing API, since it bypasses the
+   * ownership scoping that `listJobs`/`getJob` enforce.
+   */
+  listAllJobsUnscoped(status?: TTSJob["status"]): TTSJob[] {
     const all = Array.from(jobStore.values());
     return status ? all.filter((j) => j.status === status) : all;
   }
