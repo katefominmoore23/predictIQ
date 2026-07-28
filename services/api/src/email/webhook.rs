@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use axum::{extract::State, http::{HeaderMap, StatusCode}, response::IntoResponse, Json};
+use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 
@@ -16,6 +17,11 @@ const MAX_TEXT_FIELD_LEN: usize = 1024;
 
 /// Maximum length for structured identifier fields (email, event type, message_id).
 const MAX_ID_FIELD_LEN: usize = 254;
+
+/// Maximum number of webhook events processed concurrently within a single batch.
+/// Bounds DB/Redis connection usage while avoiding fully sequential processing
+/// of large SendGrid batches (which can contain hundreds of events per POST).
+const WEBHOOK_BATCH_CONCURRENCY: usize = 16;
 
 /// Raw deserialization target — accepts any valid JSON so we can validate
 /// before committing anything to the database.
@@ -185,19 +191,33 @@ impl WebhookHandler {
     }
 
     /// Process a list of already-sanitized SendGrid webhook events.
+    ///
+    /// Events are processed concurrently (bounded by `WEBHOOK_BATCH_CONCURRENCY`)
+    /// rather than one at a time, since a single POST can contain hundreds of
+    /// events and fully sequential processing risks holding the request open
+    /// past the SendGrid webhook timeout budget.
     pub async fn handle_sendgrid_webhook(
         &self,
         events: Vec<SendGridEvent>,
     ) -> Result<WebhookResponse> {
+        let results: Vec<(String, Result<()>)> = stream::iter(events)
+            .map(|event| async move {
+                let event_desc = event.event.clone();
+                (event_desc, self.process_event(event).await)
+            })
+            .buffer_unordered(WEBHOOK_BATCH_CONCURRENCY)
+            .collect()
+            .await;
+
         let mut processed = 0;
         let mut errors = Vec::new();
 
-        for event in events {
-            match self.process_event(event.clone()).await {
+        for (event_desc, result) in results {
+            match result {
                 Ok(_) => processed += 1,
                 Err(e) => {
                     tracing::error!("Error processing webhook event: {}", e);
-                    errors.push(format!("Event {}: {}", event.event, e));
+                    errors.push(format!("Event {}: {}", event_desc, e));
                 }
             }
         }

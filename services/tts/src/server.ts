@@ -146,20 +146,30 @@ const ttsRateLimiter = rateLimit({
 });
 app.use(ttsRateLimiter);
 
+/** Extract the bearer credential from the Authorization header, if present. */
+function extractCredential(req: Request): string | undefined {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return undefined;
+  return authHeader.replace(/^Bearer\s+/i, "");
+}
+
 // Issue #723: Authentication middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
-  // Skip auth for health checks
-  if (req.path.startsWith("/health")) {
+  // Only /health/live (liveness probe) is exempt from auth — orchestrators
+  // need it reachable without credentials. The detailed /health and
+  // /health/ready payloads disclose internal config and provider state
+  // (API key validity, circuit breaker stats, queue depth) and must be
+  // authenticated like any other endpoint.
+  if (req.path === "/health/live") {
     return next();
   }
 
   if (config.auth) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const credential = extractCredential(req);
+    if (!credential) {
       return res.status(401).json({ error: "Missing Authorization header" });
     }
 
-    const credential = authHeader.replace(/^Bearer\s+/i, "");
     try {
       const { authenticate } = require("./TTSService");
       authenticate(credential, config.auth);
@@ -242,7 +252,8 @@ app.post("/tts/enqueue", async (req: Request, res: Response) => {
 
     // enqueueAsync so rate limiting is enforced consistently across
     // replicas when REDIS_URL / config.sharedStore is configured (#1133).
-    const jobId = await service.enqueueAsync(text, voice, provider, undefined, rateLimitKey, bypassCache);
+    const credential = extractCredential(req);
+    const jobId = await service.enqueueAsync(text, voice, provider, credential, rateLimitKey, bypassCache);
     res.json({ jobId, status: "pending" });
   } catch (error: any) {
     const statusCode = error.statusCode || 500;
@@ -265,13 +276,21 @@ app.post("/tts/enqueue", async (req: Request, res: Response) => {
  * }
  */
 app.get("/tts/job/:id", async (req: Request, res: Response) => {
-  // getJobAsync falls back to the shared store so polling succeeds
-  // regardless of which replica originally processed the job (#1133).
-  const job = await service.getJobAsync(req.params.id);
-  if (!job) {
-    return res.status(404).json({ error: "Job not found" });
+  try {
+    // getJobAsync falls back to the shared store so polling succeeds
+    // regardless of which replica originally processed the job (#1133).
+    const credential = extractCredential(req);
+    const job = await service.getJobAsync(req.params.id, credential);
+    if (!job) {
+      // Same response whether the job doesn't exist or belongs to another
+      // tenant, so a credential can't distinguish the two by probing IDs.
+      return res.status(404).json({ error: "Job not found" });
+    }
+    res.json(job);
+  } catch (error: any) {
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({ error: error.message });
   }
-  res.json(job);
 });
 
 /**
@@ -288,9 +307,15 @@ app.get("/tts/job/:id", async (req: Request, res: Response) => {
  * ]
  */
 app.get("/tts/jobs", async (req: Request, res: Response) => {
-  const status = req.query.status as any;
-  const jobs = await service.listJobsAsync(status);
-  res.json(jobs);
+  try {
+    const status = req.query.status as any;
+    const credential = extractCredential(req);
+    const jobs = await service.listJobsAsync(status, credential);
+    res.json(jobs);
+  } catch (error: any) {
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({ error: error.message });
+  }
 });
 
 /**
@@ -328,11 +353,12 @@ app.post("/tts/generate", async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Unknown voice: ${voiceId}` });
     }
 
+    const credential = extractCredential(req);
     const outputPath = await service.generate(
       text,
       voice,
       provider,
-      undefined,
+      credential,
       rateLimitKey,
       bypassCache,
     );
