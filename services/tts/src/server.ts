@@ -139,8 +139,12 @@ function extractCredential(req: Request): string | undefined {
 
 // Issue #723: Authentication middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
-  // Skip auth for health checks
-  if (req.path.startsWith("/health")) {
+  // Only /health/live (liveness probe) is exempt from auth — orchestrators
+  // need it reachable without credentials. The detailed /health and
+  // /health/ready payloads disclose internal config and provider state
+  // (API key validity, circuit breaker stats, queue depth) and must be
+  // authenticated like any other endpoint.
+  if (req.path === "/health/live") {
     return next();
   }
 
