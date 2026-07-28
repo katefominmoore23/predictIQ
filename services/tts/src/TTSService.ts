@@ -616,8 +616,18 @@ export class TTSService {
 
   /**
    * Build one circuit breaker per configured TTS provider.  The breaker
-   * wraps a thin async action that accepts (text, voice) and delegates to
-   * the raw provider implementation.
+   * wraps the *entire retried request* (raw provider call + backoff
+   * retries), not a single raw call.  This is deliberate: firing the
+   * breaker once per retry attempt would let one failed user request
+   * inflate the breaker's failure count by up to `maxRetries + 1`, tripping
+   * it far earlier than the configured threshold intends, and — once
+   * open — a retry loop wrapped *around* the breaker would keep retrying
+   * the "circuit open" error with full exponential backoff instead of
+   * failing fast (see issue #1131). By wrapping retries *inside* the
+   * breaker action, opossum's `fire()` is called exactly once per external
+   * request, records exactly one success/failure per request, and — when
+   * already open — rejects immediately without invoking the action (and
+   * therefore without running any retry/backoff logic) at all.
    */
   private _initCircuitBreakers(): void {
     const cbCfg: Required<CircuitBreakerConfig> = {
@@ -636,14 +646,19 @@ export class TTSService {
       rollingCountTimeout: cbCfg.rollingWindowMs,
       // Half-open retry delay
       resetTimeout: cbCfg.halfOpenIntervalMs,
-      // Per-call timeout (counted as a failure)
+      // Per-call timeout (counted as a failure). Bounds the whole retried
+      // request, since the action below includes the retry/backoff loop.
       timeout: cbCfg.timeoutMs,
     };
 
     if (this.config.elevenlabs) {
       const elBreaker = new CircuitBreaker(
         async (text: string, voice: TTSVoice) =>
-          generateElevenLabs(text, voice, this.config.elevenlabs!),
+          withRetry(
+            () => generateElevenLabs(text, voice, this.config.elevenlabs!),
+            this._retryConfig(),
+            "provider:elevenlabs"
+          ),
         { ...opossumOptions, name: "elevenlabs" }
       );
       elBreaker.on("open",     () => console.warn("[CircuitBreaker] ElevenLabs circuit OPENED — fast-failing"));
@@ -655,7 +670,11 @@ export class TTSService {
     if (this.config.google) {
       const gBreaker = new CircuitBreaker(
         async (text: string, voice: TTSVoice) =>
-          generateGoogle(text, voice, this.config.google!),
+          withRetry(
+            () => generateGoogle(text, voice, this.config.google!),
+            this._retryConfig(),
+            "provider:google"
+          ),
         { ...opossumOptions, name: "google" }
       );
       gBreaker.on("open",     () => console.warn("[CircuitBreaker] Google TTS circuit OPENED — fast-failing"));
@@ -663,6 +682,13 @@ export class TTSService {
       gBreaker.on("close",    () => console.info ("[CircuitBreaker] Google TTS circuit CLOSED — recovered"));
       this.breakers.set("google", gBreaker);
     }
+  }
+
+  private _retryConfig(): RetryConfig {
+    return {
+      maxRetries: this.config.retry?.maxRetries ?? 3,
+      maxDelayMs: this.config.retry?.maxDelayMs ?? 60_000,
+    };
   }
 
   /**
@@ -819,8 +845,11 @@ export class TTSService {
   }
 
   /**
-   * Try the requested provider with retry; if it fails and a fallback is available, try that.
-   * Transient errors (429, 5xx) are retried with exponential backoff + full jitter.
+   * Try the requested provider; if it fails and a fallback is available, try that.
+   * Transient errors (429, 5xx) are retried with exponential backoff + full jitter
+   * *inside* `_callProvider`'s circuit breaker action (see `_initCircuitBreakers`),
+   * so each provider is attempted at most once per call here — retries are not
+   * layered on top of the breaker, which would defeat its fast-fail behavior.
    * Non-retriable errors (400, 401, 403) propagate immediately.
    */
   private async _generateWithFallback(job: TTSJob): Promise<Buffer> {
@@ -829,17 +858,8 @@ export class TTSService {
     const hasFallback =
       fallback === "google" ? !!this.config.google : !!this.config.elevenlabs;
 
-    const retryConfig: RetryConfig = {
-      maxRetries: this.config.retry?.maxRetries ?? 3,
-      maxDelayMs: this.config.retry?.maxDelayMs ?? 60_000,
-    };
-
     try {
-      return await withRetry(
-        () => this._callProvider(primary, job.text, job.voice),
-        retryConfig,
-        `provider:${primary}`
-      );
+      return await this._callProvider(primary, job.text, job.voice);
     } catch (primaryErr) {
       const errMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
       console.error(`[TTSService] Primary provider "${primary}" failed: ${errMsg}`);
@@ -852,11 +872,7 @@ export class TTSService {
 
       console.warn(`[TTSService] Falling back to "${fallback}"`);
       try {
-        return await withRetry(
-          () => this._callProvider(fallback, job.text, job.voice),
-          retryConfig,
-          `provider:${fallback}`
-        );
+        return await this._callProvider(fallback, job.text, job.voice);
       } catch (fallbackErr) {
         const fbMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
         console.error(`[TTSService] Fallback provider "${fallback}" also failed: ${fbMsg}`);
@@ -878,31 +894,44 @@ export class TTSService {
     if (provider === "elevenlabs") {
       if (!this.config.elevenlabs) throw new TTSProviderError("elevenlabs", "ElevenLabs config missing");
       if (breaker) {
-        try {
-          return await breaker.fire(text, voice) as Buffer;
-        } catch (err) {
-          // Re-wrap open-circuit errors as TTSProviderError so callers get a
-          // consistent error type and a meaningful 503 status code.
-          if (err instanceof Error && err.message.includes("open")) {
-            throw new TTSProviderError("elevenlabs", `Circuit breaker OPEN: ${err.message}`, 503);
-          }
-          throw err;
-        }
+        // Retries happen inside the breaker's action (see
+        // _initCircuitBreakers) — fire() is called exactly once here per
+        // external request, and rejects immediately without retry/backoff
+        // when the circuit is already open (fail-fast, not retried by any
+        // outer caller — see _generateWithFallback).
+        return await this._fireBreaker("elevenlabs", breaker, text, voice);
       }
-      return generateElevenLabs(text, voice, this.config.elevenlabs);
+      return withRetry(
+        () => generateElevenLabs(text, voice, this.config.elevenlabs!),
+        this._retryConfig(),
+        "provider:elevenlabs"
+      );
     } else {
       if (!this.config.google) throw new TTSProviderError("google", "Google TTS config missing");
       if (breaker) {
-        try {
-          return await breaker.fire(text, voice) as Buffer;
-        } catch (err) {
-          if (err instanceof Error && err.message.includes("open")) {
-            throw new TTSProviderError("google", `Circuit breaker OPEN: ${err.message}`, 503);
-          }
-          throw err;
-        }
+        return await this._fireBreaker("google", breaker, text, voice);
       }
-      return generateGoogle(text, voice, this.config.google);
+      return withRetry(
+        () => generateGoogle(text, voice, this.config.google!),
+        this._retryConfig(),
+        "provider:google"
+      );
+    }
+  }
+
+  private async _fireBreaker(
+    provider: TTSProvider,
+    breaker: CircuitBreaker,
+    text: string,
+    voice: TTSVoice
+  ): Promise<Buffer> {
+    try {
+      return await breaker.fire(text, voice) as Buffer;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("open")) {
+        throw new TTSProviderError(provider, `Circuit breaker OPEN: ${err.message}`, 503);
+      }
+      throw err;
     }
   }
 
