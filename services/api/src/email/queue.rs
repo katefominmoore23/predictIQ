@@ -10,6 +10,7 @@ use crate::cache::RedisCache;
 use crate::db::Database;
 use crate::email::service::idempotency_key;
 use crate::email::types::{EmailJobStatus, EmailJobType};
+use crate::metrics::Metrics;
 use crate::shutdown::ShutdownCoordinator;
 
 const EMAIL_QUEUE_KEY: &str = "email:queue";
@@ -204,6 +205,26 @@ impl EmailQueue {
                     .await
                     .context("Failed to add job to dead-letter set")?;
 
+                // Dual-write to PostgreSQL for durability — Redis DLQ survives only
+                // as long as Redis data does; the DB copy survives restarts and flushes.
+                let dlq_payload = serde_json::json!({
+                    "job_type": job.job_type,
+                    "recipient_email": job.recipient_email,
+                    "template_name": job.template_name,
+                    "template_data": job.template_data,
+                });
+                if let Err(e) = self
+                    .db
+                    .email_create_dead_letter_job(job_id, dlq_payload, error, new_attempts)
+                    .await
+                {
+                    tracing::error!(
+                        job_id = %job_id,
+                        error = %e,
+                        "Failed to persist dead-letter job to PostgreSQL — Redis copy still exists"
+                    );
+                }
+
                 tracing::error!(
                     "Email job {} permanently failed after {} attempts: {}",
                     job_id,
@@ -305,6 +326,15 @@ impl EmailQueue {
             .await
             .context("Failed to re-enqueue dead-letter job")?;
 
+        // Remove the durable DB copy now that the job is back in the queue.
+        if let Err(e) = self.db.email_delete_dead_letter_job(job_id).await {
+            tracing::warn!(
+                job_id = %job_id,
+                error = %e,
+                "Failed to remove dead-letter job from PostgreSQL — stale entry will remain"
+            );
+        }
+
         tracing::info!(
             job_id = %job_id,
             delay_secs = Self::DEAD_LETTER_REQUEUE_DELAY_SECS,
@@ -343,6 +373,16 @@ impl EmailQueue {
             retry,
             dead_letter,
         })
+    }
+
+    /// Get the current depth of the main email queue.
+    pub async fn get_queue_depth(&self) -> Result<usize> {
+        let mut conn = self.cache.get_connection().await?;
+        let depth: usize = conn
+            .zcard(EMAIL_QUEUE_KEY)
+            .await
+            .context("Failed to get queue depth")?;
+        Ok(depth)
     }
 
     /// Re-queue any jobs stuck in the processing set (e.g. from a previous crash).
@@ -416,14 +456,35 @@ impl EmailQueue {
         shutdown: CancellationToken,
         coordinator: ShutdownCoordinator,
         stale_job_threshold_secs: u64,
+        metrics: Option<crate::metrics::Metrics>,
     ) {
+        const WORKER_NAME: &str = "email_queue";
+        
+        // Set worker status to running
+        if let Some(ref m) = metrics {
+            m.set_worker_status(WORKER_NAME, true);
+        }
+        
         tracing::info!("Email queue worker started");
 
         if let Err(e) = self.recover_orphaned_jobs(stale_job_threshold_secs).await {
             tracing::warn!("Failed to recover orphaned jobs: {}", e);
         }
 
+        let mut heartbeat_interval = tokio::time::interval(Duration::from_secs(30));
+        heartbeat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         loop {
+            // Update heartbeat
+            tokio::select! {
+                _ = heartbeat_interval.tick() => {
+                    if let Some(ref m) = metrics {
+                        m.set_worker_status(WORKER_NAME, true);
+                    }
+                }
+                else => {}
+            }
+            
             // Do not pick up new work after shutdown signal.
             if shutdown.is_cancelled() {
                 tracing::info!("Email queue worker: shutdown signal received, draining stops");
@@ -464,8 +525,19 @@ impl EmailQueue {
                     }
                 }
             }
+
+            if let Some(ref m) = metrics {
+                if let Ok(depth) = self.get_queue_depth().await {
+                    m.set_email_queue_depth(depth as i64);
+                }
+            }
         }
 
+        // Set worker status to stopped
+        if let Some(ref m) = metrics {
+            m.set_worker_status(WORKER_NAME, false);
+        }
+        
         tracing::info!("Email queue worker stopped");
         coordinator.worker_completed();
     }
@@ -492,11 +564,15 @@ impl EmailQueue {
             .await?;
 
         // Derive a stable idempotency key for this job so retries never
-        // produce duplicate sends within the configured TTL window.
+        // produce duplicate sends within the configured TTL window. The key
+        // is bucketed off the job's original creation time (not "now") so
+        // that a retry delayed past an hour boundary by exponential backoff
+        // still computes the same key as earlier attempts of the same job.
         let idem = idempotency_key(
             &job.recipient_email,
             &job.template_name,
-            &job.template_data,
+            &service.idempotency_secret,
+            job.created_at,
         );
 
         // Send email (deduplication handled inside send_email_idempotent)

@@ -47,8 +47,10 @@ regexes = [
   # Generic placeholder domain used in code examples and templates — not a real host
   '''example\.com''',
   # Loopback addresses are not secrets; they appear in default config and tests
-  '''localhost''',
-  '''127\.0\.0\.1''',
+  '''^localhost$''',
+  '''^127\.0\.0\.1$''',
+  '''^postgres(ql)?://(?:postgres|user|admin|root|example):(?:password|pass|postgres|example|secret)@(?:localhost|127\.0\.0\.1)(?::[0-9]+)?/[A-Za-z0-9_-]+$''',
+  '''^redis://(?:postgres|user|admin|root|example):(?:password|pass|postgres|example|secret)@(?:localhost|127\.0\.0\.1):[0-9]+$''',
   # Canonical Stellar placeholder public key (all X's) used in documentation
   '''GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX''',
   # Canonical Stellar placeholder secret key (all X's) used in documentation
