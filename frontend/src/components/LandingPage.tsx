@@ -6,6 +6,9 @@ import { api } from '../lib/api/public-client';
 import { Statistics } from './Statistics';
 import { ErrorBoundary } from './ErrorBoundary';
 import { LoadingSpinner } from './LoadingSpinner';
+import { FeatureCard } from './landing/FeatureCard';
+import { Step } from './landing/Step';
+import { FooterColumn } from './landing/FooterColumn';
 
 interface LandingPageProps {
   className?: string;
@@ -19,10 +22,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
   const [isSubmitted, setIsSubmitted] = React.useState(false);
   const [apiError, setApiError] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
-  const formStatusRef = React.useRef<HTMLDivElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isLoading || isSubmitted) {
+      return;
+    }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!email) {
@@ -42,9 +48,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
       const result = await api.newsletterSubscribe({ email });
       if (result.success) {
         setIsSubmitted(true);
-        if (formStatusRef.current) {
-          formStatusRef.current.textContent = t('hero.successMessage');
-        }
       } else {
         setApiError(result.message || 'Subscription failed');
       }
@@ -60,6 +63,32 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
       e.currentTarget.requestSubmit();
     }
   };
+
+  const features = [
+    { icon: '/icons/decentralized.svg', title: t('features.decentralized.title'), description: t('features.decentralized.description') },
+    { icon: '/icons/secure.svg', title: t('features.secure.title'), description: t('features.secure.description') },
+    { icon: '/icons/fast.svg', title: t('features.fast.title'), description: t('features.fast.description') },
+  ];
+
+  const steps = [
+    { title: t('howItWorks.step1.title'), description: t('howItWorks.step1.description') },
+    { title: t('howItWorks.step2.title'), description: t('howItWorks.step2.description') },
+    { title: t('howItWorks.step3.title'), description: t('howItWorks.step3.description') },
+    { title: t('howItWorks.step4.title'), description: t('howItWorks.step4.description') },
+  ];
+
+  const footerColumns = [
+    { heading: t('footer.title'), headingLevel: 'h2' as const, tagline: t('footer.tagline') },
+    { heading: t('footer.linksHeading'), links: [
+      { href: '/docs', label: t('footer.documentation') },
+      { href: '/github', label: t('footer.github') },
+      { href: '/discord', label: t('footer.discord') },
+    ] },
+    { heading: t('footer.legalHeading'), links: [
+      { href: '/privacy', label: t('footer.privacy') },
+      { href: '/terms', label: t('footer.terms') },
+    ] },
+  ];
 
   return (
     <div className={className}>
@@ -181,9 +210,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
               )}
             </div>
 
-            <button 
-              type="submit" 
-              disabled={isSubmitted || isLoading}
+            <button
+              type="submit"
+              aria-disabled={isSubmitted || isLoading}
               aria-label={
                 isLoading 
                   ? 'Submitting...' 
@@ -203,13 +232,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
 
             {/* Screen reader announcement */}
             <div 
-              ref={formStatusRef}
               id="form-status" 
               role="status" 
               aria-live="polite" 
               aria-atomic="true"
               className="visually-hidden"
-            />
+            >
+              {isSubmitted && t('hero.successMessage')}
+            </div>
           </form>
         </section>
 
@@ -237,47 +267,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
           <h2 id="features-heading">{t('features.heading')}</h2>
           
           <div className="features-grid">
-            <article className="feature-card">
-              <img 
-                src="/icons/decentralized.svg" 
-                alt="" 
-                aria-hidden="true"
-                width="64"
-                height="64"
-              />
-              <h3>{t('features.decentralized.title')}</h3>
-              <p>
-                {t('features.decentralized.description')}
-              </p>
-            </article>
-
-            <article className="feature-card">
-              <img 
-                src="/icons/secure.svg" 
-                alt="" 
-                aria-hidden="true"
-                width="64"
-                height="64"
-              />
-              <h3>{t('features.secure.title')}</h3>
-              <p>
-                {t('features.secure.description')}
-              </p>
-            </article>
-
-            <article className="feature-card">
-              <img 
-                src="/icons/fast.svg" 
-                alt="" 
-                aria-hidden="true"
-                width="64"
-                height="64"
-              />
-              <h3>{t('features.fast.title')}</h3>
-              <p>
-                {t('features.fast.description')}
-              </p>
-            </article>
+            {features.map((feature) => (
+              <FeatureCard key={feature.title} {...feature} />
+            ))}
           </div>
         </section>
 
@@ -286,22 +278,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
           <h2 id="how-it-works-heading">{t('howItWorks.heading')}</h2>
           
           <ol className="steps-list">
-            <li>
-              <h3>{t('howItWorks.step1.title')}</h3>
-              <p>{t('howItWorks.step1.description')}</p>
-            </li>
-            <li>
-              <h3>{t('howItWorks.step2.title')}</h3>
-              <p>{t('howItWorks.step2.description')}</p>
-            </li>
-            <li>
-              <h3>{t('howItWorks.step3.title')}</h3>
-              <p>{t('howItWorks.step3.description')}</p>
-            </li>
-            <li>
-              <h3>{t('howItWorks.step4.title')}</h3>
-              <p>{t('howItWorks.step4.description')}</p>
-            </li>
+            {steps.map((step) => (
+              <Step key={step.title} {...step} />
+            ))}
           </ol>
         </section>
 
@@ -320,27 +299,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
       {/* Footer */}
       <footer role="contentinfo" id="contact">
         <div className="footer-content">
-          <div className="footer-section">
-            <h2>{t('footer.title')}</h2>
-            <p>{t('footer.tagline')}</p>
-          </div>
-          
-          <div className="footer-section">
-            <h3>{t('footer.linksHeading')}</h3>
-            <ul>
-              <li><a href="/docs">{t('footer.documentation')}</a></li>
-              <li><a href="/github">{t('footer.github')}</a></li>
-              <li><a href="/discord">{t('footer.discord')}</a></li>
-            </ul>
-          </div>
-          
-          <div className="footer-section">
-            <h3>{t('footer.legalHeading')}</h3>
-            <ul>
-              <li><a href="/privacy">{t('footer.privacy')}</a></li>
-              <li><a href="/terms">{t('footer.terms')}</a></li>
-            </ul>
-          </div>
+          {footerColumns.map((column) => (
+            <FooterColumn key={column.heading} {...column} />
+          ))}
         </div>
         
         <div className="footer-bottom">

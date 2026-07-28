@@ -575,6 +575,199 @@ describe('API Client', () => {
       const second = await api.getFeaturedMarkets();
       expect(second).toEqual([{ id: 1, title: 'Resolved Market' }]);
     });
+
+    it('does not invalidate cache when mutation returns success:false (#1162)', async () => {
+      // Prime a statistics cache entry.
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ total_markets: 10 }),
+      });
+      await api.getStatistics();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // newsletterSubscribe returns 200 with success:false (business-logic failure).
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ success: false, message: 'Email already subscribed' }),
+      });
+      await api.newsletterSubscribe({ email: 'existing@example.com' });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+
+      // Cache must NOT be invalidated — next getStatistics should return cached value.
+      const cachedStats = await api.getStatistics();
+      expect(cachedStats).toEqual({ total_markets: 10 });
+      // fetch should not have been called again (still 2 calls total).
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('invalidates cache when mutation returns success:true (#1162)', async () => {
+      // Prime a statistics cache entry.
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ total_markets: 10 }),
+      });
+      await api.getStatistics();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // newsletterSubscribe succeeds.
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ success: true, message: 'Subscribed!' }),
+      });
+      await api.newsletterSubscribe({ email: 'new@example.com' });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+
+      // Cache MUST be invalidated — next getStatistics should hit the network.
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ total_markets: 11 }),
+      });
+      const freshStats = await api.getStatistics();
+      expect(freshStats).toEqual({ total_markets: 11 });
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+
+    it('invalidates cache for mutations that do not use success envelope (#1162)', async () => {
+      // Prime a markets cache entry.
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify([{ id: 1, title: 'Market' }]),
+      });
+      await api.getFeaturedMarkets();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // resolveMarket returns { invalidated_keys: N } (no success field).
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ invalidated_keys: 2 }),
+      });
+      await api.resolveMarket(1);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+
+      // Cache MUST be invalidated — next getFeaturedMarkets hits the network.
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify([{ id: 1, title: 'Resolved' }]),
+      });
+      const freshMarkets = await api.getFeaturedMarkets();
+      expect(freshMarkets).toEqual([{ id: 1, title: 'Resolved' }]);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('GDPR export (#1156)', () => {
+    it('sends email in the POST request body, not as a URL query parameter', async () => {
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ success: true, data: {} }),
+      });
+
+      await api.newsletterGdprExport('user@example.com');
+
+      const [calledUrl, calledInit] = (global.fetch as jest.Mock).mock.calls[0];
+
+      // Email must NOT appear in the URL to prevent logging PII in access logs.
+      expect(calledUrl).not.toContain('user@example.com');
+      expect(calledUrl).not.toContain('email=');
+
+      // Email MUST be in the JSON body.
+      expect(calledInit.method).toBe('POST');
+      expect(JSON.parse(calledInit.body as string)).toEqual({ email: 'user@example.com' });
+    });
+  });
+
+  describe('GDPR export (#1156)', () => {
+    it('sends email in the POST request body, not as a URL query parameter', async () => {
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ success: true, data: {} }),
+      });
+
+      await api.newsletterGdprExport('user@example.com');
+
+      const [calledUrl, calledInit] = (global.fetch as jest.Mock).mock.calls[0];
+
+      // Email must NOT appear in the URL to prevent logging PII in access logs.
+      expect(calledUrl).not.toContain('user@example.com');
+      expect(calledUrl).not.toContain('email=');
+
+      // Email MUST be in the JSON body.
+      expect(calledInit.method).toBe('POST');
+      expect(JSON.parse(calledInit.body as string)).toEqual({ email: 'user@example.com' });
+    });
+  });
+
+  describe('URI encoding of path parameters (#1157)', () => {
+    const mockOk = (data: unknown = { ok: true }) =>
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: async () => JSON.stringify(data),
+      });
+
+    const base = 'http://localhost:3001';
+
+    it('getBlockchainMarket encodes a slash in marketId', async () => {
+      mockOk();
+      await api.getBlockchainMarket('foo/bar');
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/blockchain/markets/foo%2Fbar`,
+        expect.any(Object),
+      );
+    });
+
+    it('getUserBets encodes a slash in user address', async () => {
+      mockOk();
+      await api.getUserBets('GA/BC');
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/blockchain/users/GA%2FBC/bets'),
+        expect.any(Object),
+      );
+    });
+
+    it('getOracleResult encodes special characters in marketId', async () => {
+      mockOk();
+      await api.getOracleResult('a/b?c#d');
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/blockchain/oracle/a%2Fb%3Fc%23d`,
+        expect.any(Object),
+      );
+    });
+
+    it('getTransactionStatus encodes a slash in txHash', async () => {
+      mockOk();
+      await api.getTransactionStatus('0x/dead');
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/blockchain/tx/0x%2Fdead`,
+        expect.any(Object),
+      );
+    });
+
+    it('resolveMarket encodes a slash in marketId', async () => {
+      mockOk();
+      await api.resolveMarket('10/20');
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/markets/10%2F20/resolve`,
+        expect.any(Object),
+      );
+    });
+
+    it('emailPreview encodes a slash in templateName', async () => {
+      mockOk();
+      await api.emailPreview('welcome/v2');
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/v1/email/preview/welcome%2Fv2`,
+        expect.any(Object),
+      );
+    });
+
+    it('plain values without special characters are unchanged', async () => {
+      mockOk();
+      await api.getBlockchainMarket(42);
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${base}/api/blockchain/markets/42`,
+        expect.any(Object),
+      );
+    });
   });
 
   describe('GDPR export (#1156)', () => {

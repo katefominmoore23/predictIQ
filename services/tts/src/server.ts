@@ -27,6 +27,19 @@ import {
 } from "./HealthCheck";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { trace, context } from "@opentelemetry/api";
+import { rateLimitKeyGenerator } from "./rateLimitKey";
+import { initTracing } from "./tracing";
+import { createRedisSharedStore } from "./SharedStore";
+
+// ---------------------------------------------------------------------------
+// Tracing
+// ---------------------------------------------------------------------------
+
+// Issue #1134: initTracing() was defined but never called anywhere, so every
+// tracer.startActiveSpan(...) call ran against the default no-op global
+// tracer provider. Must run once, before any request handling, so the
+// HttpInstrumentation and OTLP exporter are wired up in time.
+initTracing();
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -64,6 +77,13 @@ const config: TTSConfig = {
     maxRetries: parseInt(process.env.TTS_MAX_RETRIES || "3", 10),
     maxDelayMs: parseInt(process.env.TTS_MAX_DELAY_MS || "60000", 10),
   },
+  // Issue #1133: job store, rate limiting, and cache are process-local Maps
+  // by default, which break correctness under horizontal scaling (a GET
+  // /tts/job/:id can land on a different pod than the one that processed
+  // the job, and rate limits multiply by replica count). Set REDIS_URL when
+  // running more than one instance behind a load balancer so state is
+  // shared across replicas.
+  sharedStore: process.env.REDIS_URL ? createRedisSharedStore(process.env.REDIS_URL) : undefined,
 };
 
 // ---------------------------------------------------------------------------
@@ -107,19 +127,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-// Issue #995: Express-level rate limiting (IP-based for anonymous, API-key-based for authenticated)
+// Issue #995 / #1132: Express-level rate limiting, keyed on the caller's IP.
+// The Authorization header cannot be used as a key here: it hasn't been
+// validated yet (auth middleware runs after this, and is optional), so a
+// rotating fake credential would otherwise reset the bucket on every request.
 const ttsRateLimitPerMinute = parseInt(process.env.TTS_RATE_LIMIT_PER_MINUTE || "60", 10);
 const ttsRateLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: ttsRateLimitPerMinute,
-  // Use API key as bucket key when present, otherwise fall back to client IP
-  keyGenerator: (req: Request): string => {
-    const authHeader = req.headers.authorization;
-    if (authHeader) {
-      return `apikey:${authHeader.replace(/^Bearer\s+/i, "")}`;
-    }
-    return `ip:${req.ip ?? "unknown"}`;
-  },
+  keyGenerator: rateLimitKeyGenerator,
   handler: (_req: Request, res: Response): void => {
     res.setHeader("Retry-After", "60");
     res.status(429).json({ error: "Too Many Requests" });
@@ -130,20 +146,30 @@ const ttsRateLimiter = rateLimit({
 });
 app.use(ttsRateLimiter);
 
+/** Extract the bearer credential from the Authorization header, if present. */
+function extractCredential(req: Request): string | undefined {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return undefined;
+  return authHeader.replace(/^Bearer\s+/i, "");
+}
+
 // Issue #723: Authentication middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
-  // Skip auth for health checks
-  if (req.path.startsWith("/health")) {
+  // Only /health/live (liveness probe) is exempt from auth — orchestrators
+  // need it reachable without credentials. The detailed /health and
+  // /health/ready payloads disclose internal config and provider state
+  // (API key validity, circuit breaker stats, queue depth) and must be
+  // authenticated like any other endpoint.
+  if (req.path === "/health/live") {
     return next();
   }
 
   if (config.auth) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const credential = extractCredential(req);
+    if (!credential) {
       return res.status(401).json({ error: "Missing Authorization header" });
     }
 
-    const credential = authHeader.replace(/^Bearer\s+/i, "");
     try {
       const { authenticate } = require("./TTSService");
       authenticate(credential, config.auth);
@@ -209,7 +235,7 @@ app.get("/health/live", createLivenessHandler(healthChecker));
  *   "status": "pending"
  * }
  */
-app.post("/tts/enqueue", (req: Request, res: Response) => {
+app.post("/tts/enqueue", async (req: Request, res: Response) => {
   try {
     const { text, voiceId, provider } = req.body;
     const rateLimitKey = req.ip || "unknown";
@@ -224,7 +250,10 @@ app.post("/tts/enqueue", (req: Request, res: Response) => {
       return res.status(400).json({ error: `Unknown voice: ${voiceId}` });
     }
 
-    const jobId = service.enqueue(text, voice, provider, undefined, rateLimitKey, bypassCache);
+    // enqueueAsync so rate limiting is enforced consistently across
+    // replicas when REDIS_URL / config.sharedStore is configured (#1133).
+    const credential = extractCredential(req);
+    const jobId = await service.enqueueAsync(text, voice, provider, credential, rateLimitKey, bypassCache);
     res.json({ jobId, status: "pending" });
   } catch (error: any) {
     const statusCode = error.statusCode || 500;
@@ -246,12 +275,22 @@ app.post("/tts/enqueue", (req: Request, res: Response) => {
  *   "updatedAt": "2024-01-15T10:30:05Z"
  * }
  */
-app.get("/tts/job/:id", (req: Request, res: Response) => {
-  const job = service.getJob(req.params.id);
-  if (!job) {
-    return res.status(404).json({ error: "Job not found" });
+app.get("/tts/job/:id", async (req: Request, res: Response) => {
+  try {
+    // getJobAsync falls back to the shared store so polling succeeds
+    // regardless of which replica originally processed the job (#1133).
+    const credential = extractCredential(req);
+    const job = await service.getJobAsync(req.params.id, credential);
+    if (!job) {
+      // Same response whether the job doesn't exist or belongs to another
+      // tenant, so a credential can't distinguish the two by probing IDs.
+      return res.status(404).json({ error: "Job not found" });
+    }
+    res.json(job);
+  } catch (error: any) {
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({ error: error.message });
   }
-  res.json(job);
 });
 
 /**
@@ -267,10 +306,16 @@ app.get("/tts/job/:id", (req: Request, res: Response) => {
  *   ...
  * ]
  */
-app.get("/tts/jobs", (req: Request, res: Response) => {
-  const status = req.query.status as any;
-  const jobs = service.listJobs(status);
-  res.json(jobs);
+app.get("/tts/jobs", async (req: Request, res: Response) => {
+  try {
+    const status = req.query.status as any;
+    const credential = extractCredential(req);
+    const jobs = await service.listJobsAsync(status, credential);
+    res.json(jobs);
+  } catch (error: any) {
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({ error: error.message });
+  }
 });
 
 /**
@@ -308,11 +353,12 @@ app.post("/tts/generate", async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Unknown voice: ${voiceId}` });
     }
 
+    const credential = extractCredential(req);
     const outputPath = await service.generate(
       text,
       voice,
       provider,
-      undefined,
+      credential,
       rateLimitKey,
       bypassCache,
     );
@@ -350,12 +396,15 @@ app.use((err: any, req: Request, res: Response, next: any) => {
 // Server startup
 // ---------------------------------------------------------------------------
 
-app.listen(port, () => {
-  console.log(`🎙️  TTS Service listening on port ${port}`);
-  console.log(`📊 Health check: GET http://localhost:${port}/health`);
-  console.log(`🔍 Readiness probe: GET http://localhost:${port}/health/ready`);
-  console.log(`💓 Liveness probe: GET http://localhost:${port}/health/live`);
-  console.log(`🎵 TTS endpoints: POST http://localhost:${port}/tts/enqueue`);
-});
+// Guarded so importing this module (e.g. from tests) doesn't bind a real port.
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`🎙️  TTS Service listening on port ${port}`);
+    console.log(`📊 Health check: GET http://localhost:${port}/health`);
+    console.log(`🔍 Readiness probe: GET http://localhost:${port}/health/ready`);
+    console.log(`💓 Liveness probe: GET http://localhost:${port}/health/live`);
+    console.log(`🎵 TTS endpoints: POST http://localhost:${port}/tts/enqueue`);
+  });
+}
 
 export default app;

@@ -18,6 +18,7 @@ jobs:
   spectral-lint:
     name: Spectral — OpenAPI structural lint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -42,11 +43,12 @@ jobs:
   contract-tests:
     name: OpenAPI Contract Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache cargo dependencies
         uses: actions/cache@v5
@@ -77,6 +79,7 @@ jobs:
     name: All OpenAPI Checks Passed
     needs: [spectral-lint, contract-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Success
         run: echo "OpenAPI spec is valid and in sync with routes."

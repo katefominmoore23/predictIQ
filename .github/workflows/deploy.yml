@@ -19,6 +19,7 @@ jobs:
   validate-secrets:
     name: Validate Required Secrets
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check required secrets are set
         run: |
@@ -53,12 +54,13 @@ jobs:
   security-scan:
     name: Checkov Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: validate-secrets
     steps:
       - uses: actions/checkout@v4
 
       - name: Run Checkov
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@7b972723c44fb3d256283fac96fae5d7c1894bb7 # v12
         with:
           directory: infrastructure/terraform
           framework: terraform
@@ -73,20 +75,31 @@ jobs:
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [validate-secrets, security-scan]
     strategy:
       matrix:
         environment: [dev, staging, prod]
+    env:
+      TF_VAR_db_username: ${{ secrets[format('DB_USERNAME_{0}', matrix.environment)] }}
+      TF_VAR_db_password: ${{ secrets[format('DB_PASSWORD_{0}', matrix.environment)] }}
+      TF_VAR_hmac_key: ${{ secrets[format('HMAC_KEY_{0}', matrix.environment)] }}
+      TF_VAR_sendgrid_api_key: ${{ secrets[format('SENDGRID_API_KEY_{0}', matrix.environment)] }}
+      TF_VAR_api_signing_key: ${{ secrets[format('API_SIGNING_KEY_{0}', matrix.environment)] }}
+      TF_VAR_acm_certificate_arn: ${{ secrets[format('ACM_CERTIFICATE_ARN_{0}', matrix.environment)] }}
+      TF_VAR_api_image_uri: ${{ secrets[format('API_IMAGE_URI_{0}', matrix.environment)] }}
+      TF_VAR_redis_auth_token: ${{ secrets[format('REDIS_AUTH_TOKEN_{0}', matrix.environment)] }}
+      TF_VAR_sendgrid_key_rotated_at: ${{ secrets[format('SENDGRID_KEY_ROTATED_AT_{0}', matrix.environment)] }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@451ce2a72e8d729a59ebeaacab82dbce58e7af4c # v6
         with:
           role-to-assume: ${{ secrets[format('AWS_ROLE_{0}', matrix.environment)] }}
           aws-region: ${{ env.AWS_REGION }}
@@ -126,22 +139,40 @@ jobs:
   apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
+    # Kept short: this job holds a DynamoDB state lock and max-parallel: 1
+    # means a hung apply blocks every other environment behind it.
+    timeout-minutes: 15
     needs: plan
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:
       matrix:
         environment: [dev, staging, prod]
       max-parallel: 1
+    # Ties each matrix leg to a GitHub Environment of the same name. Configure
+    # a "prod" environment with required reviewers in repo settings so that
+    # leg pauses for manual approval; dev/staging can stay unprotected and will
+    # keep auto-applying on merge to main, matching environments/README.md.
+    environment: ${{ matrix.environment }}
+    env:
+      TF_VAR_db_username: ${{ secrets[format('DB_USERNAME_{0}', matrix.environment)] }}
+      TF_VAR_db_password: ${{ secrets[format('DB_PASSWORD_{0}', matrix.environment)] }}
+      TF_VAR_hmac_key: ${{ secrets[format('HMAC_KEY_{0}', matrix.environment)] }}
+      TF_VAR_sendgrid_api_key: ${{ secrets[format('SENDGRID_API_KEY_{0}', matrix.environment)] }}
+      TF_VAR_api_signing_key: ${{ secrets[format('API_SIGNING_KEY_{0}', matrix.environment)] }}
+      TF_VAR_acm_certificate_arn: ${{ secrets[format('ACM_CERTIFICATE_ARN_{0}', matrix.environment)] }}
+      TF_VAR_api_image_uri: ${{ secrets[format('API_IMAGE_URI_{0}', matrix.environment)] }}
+      TF_VAR_redis_auth_token: ${{ secrets[format('REDIS_AUTH_TOKEN_{0}', matrix.environment)] }}
+      TF_VAR_sendgrid_key_rotated_at: ${{ secrets[format('SENDGRID_KEY_ROTATED_AT_{0}', matrix.environment)] }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@451ce2a72e8d729a59ebeaacab82dbce58e7af4c # v6
         with:
           role-to-assume: ${{ secrets[format('AWS_ROLE_{0}', matrix.environment)] }}
           aws-region: ${{ env.AWS_REGION }}
@@ -178,7 +209,13 @@ jobs:
 
       - name: Output infrastructure details
         working-directory: infrastructure/terraform
-        run: terraform output -json > /tmp/outputs-${{ matrix.environment }}.json
+        run: |
+          # Human-readable output still relies on Terraform's own `sensitive`
+          # redaction, so it's safe to print to the (already access-controlled) logs.
+          terraform output
+          # -json bypasses that redaction entirely, so strip the sensitive keys
+          # ourselves before anything touches disk / an uploaded artifact.
+          terraform output -json | jq 'del(.rds_endpoint, .redis_endpoint)' > /tmp/outputs-${{ matrix.environment }}.json
 
       - name: Upload outputs
         uses: actions/upload-artifact@v7
