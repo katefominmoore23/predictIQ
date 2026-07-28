@@ -3,6 +3,7 @@ use std::time::Duration;
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use tokio::time::error::Elapsed;
 
@@ -14,7 +15,14 @@ use crate::{
 /// Errors that can be returned by [`Database`] methods.
 #[derive(Debug)]
 pub enum DbError {
+    /// A query exceeded the per-operation timeout.
     Timeout,
+    /// The connection pool had no connections available within the acquire timeout.
+    PoolExhausted,
+    /// A database constraint was violated (unique, foreign-key, not-null, check).
+    /// The inner string is the database error message for logging.
+    ConstraintViolation(String),
+    /// Any other database error.
     Other(anyhow::Error),
 }
 
@@ -22,6 +30,10 @@ impl std::fmt::Display for DbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DbError::Timeout => write!(f, "database query timed out"),
+            DbError::PoolExhausted => write!(f, "database connection pool exhausted"),
+            DbError::ConstraintViolation(msg) => {
+                write!(f, "database constraint violation: {msg}")
+            }
             DbError::Other(e) => write!(f, "{e}"),
         }
     }
@@ -31,7 +43,19 @@ impl std::error::Error for DbError {}
 
 impl From<sqlx::Error> for DbError {
     fn from(e: sqlx::Error) -> Self {
-        DbError::Other(anyhow::Error::from(e))
+        match &e {
+            sqlx::Error::PoolTimedOut => DbError::PoolExhausted,
+            sqlx::Error::Database(db_err) => {
+                // PostgreSQL constraint violation SQLSTATE codes start with "23"
+                // (23000 integrity constraint, 23505 unique violation, etc.).
+                if db_err.code().map(|c| c.starts_with("23")).unwrap_or(false) {
+                    DbError::ConstraintViolation(db_err.message().to_string())
+                } else {
+                    DbError::Other(anyhow::Error::from(e))
+                }
+            }
+            _ => DbError::Other(anyhow::Error::from(e)),
+        }
     }
 }
 
@@ -93,9 +117,26 @@ pub struct NewsletterSubscriber {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
+/// A single row from the `api_keys` table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKeyRecord {
+    pub id: uuid::Uuid,
+    pub key_hash: String,
+    pub label: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
 impl Database {
     pub fn pool(&self) -> PgPool {
         self.pool.clone()
+    }
+
+    /// Snapshot pool size/idle into Prometheus gauges.
+    /// Call this just before rendering `/metrics` so the values are current.
+    pub fn record_pool_metrics(&self) {
+        self.metrics.observe_pool_connections("primary", self.pool.size() as i64, self.pool.num_idle() as i64);
     }
 
     pub async fn new(
@@ -104,10 +145,24 @@ impl Database {
         metrics: Metrics,
         pool_config: &crate::config::DbPoolConfig,
     ) -> anyhow::Result<Self> {
+        let stmt_timeout_ms = pool_config.statement_timeout_ms;
+        let lock_timeout_ms = pool_config.lock_timeout_ms;
+
         let mut builder = PgPoolOptions::new()
             .max_connections(pool_config.max_connections)
             .min_connections(pool_config.min_connections)
-            .acquire_timeout(pool_config.acquire_timeout);
+            .acquire_timeout(pool_config.acquire_timeout)
+            .after_connect(move |conn, _meta| {
+                Box::pin(async move {
+                    sqlx::query(&format!("SET statement_timeout = {stmt_timeout_ms}"))
+                        .execute(&mut *conn)
+                        .await?;
+                    sqlx::query(&format!("SET lock_timeout = {lock_timeout_ms}"))
+                        .execute(&mut *conn)
+                        .await?;
+                    Ok(())
+                })
+            });
 
         if let Some(idle) = pool_config.idle_timeout {
             builder = builder.idle_timeout(idle);
@@ -130,14 +185,27 @@ impl Database {
     }
 
     /// Run `fut` with the configured query timeout.
+    /// On success, records the query duration in the `db_query_duration_seconds` histogram.
     /// On timeout, increments the `db_timeouts` metric and logs a warning.
+    /// On pool exhaustion, increments the `db_pool_exhaustion_total` counter.
     async fn with_timeout<F, T>(&self, operation: &str, fut: F) -> Result<T, DbError>
     where
         F: std::future::Future<Output = Result<T, sqlx::Error>>,
     {
+        let start = std::time::Instant::now();
         match tokio::time::timeout(self.query_timeout, fut).await {
-            Ok(Ok(v)) => Ok(v),
-            Ok(Err(e)) => Err(DbError::Other(anyhow::Error::from(e))),
+            Ok(Ok(v)) => {
+                self.metrics
+                    .observe_db_query_duration(operation, start.elapsed());
+                Ok(v)
+            }
+            Ok(Err(e)) => {
+                if matches!(&e, sqlx::Error::PoolTimedOut) {
+                    self.metrics.observe_db_pool_exhaustion("api");
+                    return Err(DbError::PoolExhausted);
+                }
+                Err(DbError::Other(anyhow::Error::from(e)))
+            }
             Err(_elapsed) => {
                 self.metrics.observe_db_timeout(operation);
                 tracing::warn!(operation, timeout_secs = ?self.query_timeout, "db query timed out");
@@ -160,7 +228,8 @@ impl Database {
                         COUNT(*) FILTER (WHERE status = 'active')::BIGINT AS active_markets, \
                         COUNT(*) FILTER (WHERE status = 'resolved')::BIGINT AS resolved_markets, \
                         COALESCE(SUM(total_volume), 0)::DOUBLE PRECISION AS total_volume \
-                    FROM markets",
+                    FROM markets \
+                    WHERE deleted_at IS NULL",
                 )
                 .fetch_one(&self.pool)).await.map_err(anyhow::Error::from)?;
 
@@ -192,7 +261,7 @@ impl Database {
                 let rows = self.with_timeout("featured_markets", sqlx::query(
                     "SELECT id, title, total_volume, ends_at \
                     FROM markets \
-                    WHERE status = 'active' \
+                    WHERE status = 'active' AND deleted_at IS NULL \
                     ORDER BY total_volume DESC, ends_at ASC \
                     LIMIT $1",
                 )
@@ -335,13 +404,25 @@ impl Database {
     }
 
     /// Remove pending (unconfirmed) subscriptions whose token has expired.
-    pub async fn newsletter_delete_expired_pending(&self, token_ttl_secs: u64) -> anyhow::Result<u64> {
+    /// `batch_size` caps the number of rows deleted per call to prevent long
+    /// table locks on large datasets; callers should loop until 0 rows are
+    /// returned if they need to drain the full backlog.
+    pub async fn newsletter_delete_expired_pending(
+        &self,
+        token_ttl_secs: u64,
+        batch_size: u64,
+    ) -> anyhow::Result<u64> {
         let result = self.with_timeout("newsletter_delete_expired_pending", sqlx::query(
             "DELETE FROM newsletter_subscribers
-             WHERE confirmed = FALSE
-               AND created_at <= NOW() - ($1 || ' seconds')::INTERVAL",
+             WHERE id IN (
+                 SELECT id FROM newsletter_subscribers
+                 WHERE confirmed = FALSE
+                   AND created_at <= NOW() - ($1 || ' seconds')::INTERVAL
+                 LIMIT $2
+             )",
         )
         .bind(token_ttl_secs as i64)
+        .bind(batch_size as i64)
         .execute(&self.pool)).await.map_err(anyhow::Error::from)?;
 
         Ok(result.rows_affected())
@@ -478,6 +559,19 @@ impl Database {
     }
 
     // Email event tracking
+    /// Create an email event record.
+    ///
+    /// ## PII Considerations
+    ///
+    /// The `recipient` field contains a personally identifiable email address.
+    /// This is stored for analytics purposes: to correlate events with recipients,
+    /// calculate delivery success rates, and track engagement per email domain.
+    ///
+    /// Important:
+    /// - The email_events table should be protected from unauthorized access
+    /// - Analytics queries should anonymize or filter recipient data for reports
+    /// - Deletion policies must align with privacy regulations (GDPR, etc)
+    /// - Consider hashing or tokenizing recipient emails in analytics aggregates
     pub async fn email_create_event(
         &self,
         job_id: Option<uuid::Uuid>,
@@ -630,8 +724,64 @@ impl Database {
         Ok(analytics)
     }
 
-    /// Stub: resolve a market outcome. Full implementation requires a markets table.
-    pub async fn resolve_market(&self, _market_id: i64, _outcome_index: u32) -> anyhow::Result<()> {
+    /// Soft-delete a market by setting `deleted_at = NOW()`.
+    /// Returns `true` if the market existed and was not already deleted.
+    pub async fn soft_delete_market(&self, market_id: i64) -> anyhow::Result<bool> {
+        let rows = self
+            .with_timeout(
+                "soft_delete_market",
+                sqlx::query(
+                    "UPDATE markets \
+                     SET deleted_at = NOW() \
+                     WHERE id = $1 AND deleted_at IS NULL",
+                )
+                .bind(market_id)
+                .execute(&self.pool),
+            )
+            .await
+            .map_err(anyhow::Error::from)?
+            .rows_affected();
+        Ok(rows > 0)
+    }
+
+    /// Hard-delete markets that have been soft-deleted for more than 30 days
+    /// by invoking the `cleanup_soft_deleted_markets` database function.
+    /// Returns the number of rows permanently removed.
+    pub async fn cleanup_soft_deleted_markets(&self) -> anyhow::Result<i32> {
+        let count: i32 = self
+            .with_timeout(
+                "cleanup_soft_deleted_markets",
+                sqlx::query_scalar("SELECT cleanup_soft_deleted_markets()").fetch_one(&self.pool),
+            )
+            .await
+            .map_err(anyhow::Error::from)?;
+        Ok(count)
+    }
+
+    /// Resolve a market by persisting the winning outcome to the database.
+    ///
+    /// Returns an error if the market does not exist or is not in `active` status.
+    pub async fn resolve_market(&self, market_id: i64, outcome_index: u32) -> anyhow::Result<()> {
+        let rows_affected = self
+            .with_timeout(
+                "resolve_market",
+                sqlx::query(
+                    "UPDATE markets \
+                     SET status = 'resolved', outcome_index = $1, resolved_at = NOW() \
+                     WHERE id = $2 AND status = 'active' AND deleted_at IS NULL",
+                )
+                .bind(outcome_index as i32)
+                .bind(market_id)
+                .execute(&self.pool),
+            )
+            .await
+            .map_err(anyhow::Error::from)?
+            .rows_affected();
+
+        if rows_affected == 0 {
+            anyhow::bail!("market {market_id} not found or not in active status");
+        }
+
         Ok(())
     }
 
@@ -648,25 +798,297 @@ impl Database {
     }
 
     /// Check whether an email event already exists (replay-attack guard).
+    ///
+    /// Deduplicates on (message_id, event_type, recipient_email) using server-side
+    /// created_at — the SendGrid-supplied timestamp is intentionally excluded because
+    /// it originates from an external, potentially spoofed source.
     pub async fn email_event_exists(
         &self,
         message_id: Option<&str>,
         event_type: &str,
         email: &str,
-        timestamp: i64,
     ) -> anyhow::Result<bool> {
         let count: i64 = self.with_timeout("email_event_exists", sqlx::query_scalar(
             "SELECT COUNT(*) FROM email_events
              WHERE message_id IS NOT DISTINCT FROM $1
                AND event_type = $2
-               AND recipient_email = $3
-               AND created_at = to_timestamp($4)",
+               AND recipient_email = $3",
         )
         .bind(message_id)
         .bind(event_type)
         .bind(email)
-        .bind(timestamp as f64)
         .fetch_one(&self.pool)).await.unwrap_or(0);
         Ok(count > 0)
+    }
+
+    /// Persist a dead-letter job to PostgreSQL for durable audit and recovery.
+    ///
+    /// Called alongside the Redis ZADD so a Redis flush never loses the entry.
+    pub async fn email_create_dead_letter_job(
+        &self,
+        id: uuid::Uuid,
+        payload: serde_json::Value,
+        failure_reason: &str,
+        retry_count: i32,
+    ) -> anyhow::Result<()> {
+        self.with_timeout(
+            "email_create_dead_letter_job",
+            sqlx::query(
+                "INSERT INTO email_dead_letter_jobs (id, payload, failure_reason, retry_count)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (id) DO UPDATE
+                   SET failure_reason = EXCLUDED.failure_reason,
+                       retry_count    = EXCLUDED.retry_count",
+            )
+            .bind(id)
+            .bind(payload)
+            .bind(failure_reason)
+            .bind(retry_count)
+            .execute(&self.pool),
+        )
+        .await
+        .map_err(anyhow::Error::from)?;
+        Ok(())
+    }
+
+    /// Upsert a watched transaction record. Called when a new tx hash is added to the monitor.
+    pub async fn watched_tx_upsert(
+        &self,
+        tx_hash: &str,
+        market_id: Option<i64>,
+        expires_at: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
+        self.with_timeout(
+            "watched_tx_upsert",
+            sqlx::query(
+                "INSERT INTO watched_transactions (tx_hash, market_id, expires_at, status)
+                 VALUES ($1, $2, $3, 'pending')
+                 ON CONFLICT (tx_hash) DO UPDATE
+                     SET expires_at = EXCLUDED.expires_at,
+                         status = CASE WHEN watched_transactions.status = 'pending'
+                                       THEN 'pending'
+                                       ELSE watched_transactions.status END",
+            )
+            .bind(tx_hash)
+            .bind(market_id)
+            .bind(expires_at)
+            .execute(&self.pool),
+        )
+        .await
+        .map_err(anyhow::Error::from)?;
+        Ok(())
+    }
+
+    /// List all dead-letter job IDs from PostgreSQL (oldest-failed first).
+    ///
+    /// Used as a fallback when Redis is unavailable or has been flushed.
+    pub async fn email_list_dead_letter_jobs(&self) -> anyhow::Result<Vec<uuid::Uuid>> {
+        let rows = self
+            .with_timeout(
+                "email_list_dead_letter_jobs",
+                sqlx::query("SELECT id FROM email_dead_letter_jobs ORDER BY failed_at ASC")
+                    .fetch_all(&self.pool),
+            )
+            .await
+            .map_err(anyhow::Error::from)?;
+        rows.iter().map(|r| r.try_get("id").map_err(anyhow::Error::from)).collect()
+    }
+
+    /// Remove a dead-letter entry from PostgreSQL when the job is re-queued.
+    pub async fn email_delete_dead_letter_job(&self, id: uuid::Uuid) -> anyhow::Result<()> {
+        self.with_timeout(
+            "email_delete_dead_letter_job",
+            sqlx::query("DELETE FROM email_dead_letter_jobs WHERE id = $1")
+                .bind(id)
+                .execute(&self.pool),
+        )
+        .await
+        .map_err(anyhow::Error::from)?;
+        Ok(())
+    }
+
+    /// Load all non-expired pending transaction hashes for in-memory restoration on startup.
+    pub async fn watched_tx_load_pending(&self) -> anyhow::Result<Vec<String>> {
+        let rows = self.with_timeout(
+            "watched_tx_load_pending",
+            sqlx::query_scalar::<_, String>(
+                "SELECT tx_hash FROM watched_transactions
+                 WHERE status = 'pending' AND expires_at > NOW()",
+            )
+            .fetch_all(&self.pool),
+        )
+        .await
+        .map_err(anyhow::Error::from)?;
+        Ok(rows)
+    }
+
+    /// Mark a watched transaction as confirmed or expired.
+    pub async fn watched_tx_mark_resolved(
+        &self,
+        tx_hash: &str,
+        status: &str,
+    ) -> anyhow::Result<()> {
+        self.with_timeout(
+            "watched_tx_mark_resolved",
+            sqlx::query(
+                "UPDATE watched_transactions SET status = $1 WHERE tx_hash = $2",
+            )
+            .bind(status)
+            .bind(tx_hash)
+            .execute(&self.pool),
+        )
+        .await
+        .map_err(anyhow::Error::from)?;
+        Ok(())
+    }
+
+    // ── API key management (issue #892) ───────────────────────────────────────
+
+    /// Insert a new API key into the database.
+    /// The caller is responsible for supplying the SHA-256 hex hash of the raw key.
+    pub async fn api_key_insert(&self, key_hash: &str, label: &str) -> anyhow::Result<ApiKeyRecord> {
+        let row = self.with_timeout("api_key_insert", sqlx::query(
+            "INSERT INTO api_keys (key_hash, label)
+             VALUES ($1, $2)
+             RETURNING id, key_hash, label, created_at, expires_at, revoked_at",
+        )
+        .bind(key_hash)
+        .bind(label)
+        .fetch_one(&self.pool)).await.map_err(anyhow::Error::from)?;
+
+        Ok(ApiKeyRecord {
+            id: row.try_get("id")?,
+            key_hash: row.try_get("key_hash")?,
+            label: row.try_get("label")?,
+            created_at: row.try_get("created_at")?,
+            expires_at: row.try_get("expires_at")?,
+            revoked_at: row.try_get("revoked_at")?,
+        })
+    }
+
+    /// Mark an existing key as expiring at the given timestamp (rotation overlap window).
+    /// Returns `true` if a row was updated, `false` if no key with that hash was found.
+    pub async fn api_key_set_expires(
+        &self,
+        key_hash: &str,
+        expires_at: DateTime<Utc>,
+    ) -> anyhow::Result<bool> {
+        let result = self.with_timeout("api_key_set_expires", sqlx::query(
+            "UPDATE api_keys SET expires_at = $1 WHERE key_hash = $2",
+        )
+        .bind(expires_at)
+        .bind(key_hash)
+        .execute(&self.pool)).await.map_err(anyhow::Error::from)?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Validate a raw API key: compute its SHA-256 hash, then return the record
+    /// if it exists, is not revoked, and is not expired.
+    pub async fn api_key_validate(&self, key_hash: &str) -> anyhow::Result<Option<ApiKeyRecord>> {
+        let row = self.with_timeout("api_key_validate", sqlx::query(
+            "SELECT id, key_hash, label, created_at, expires_at, revoked_at
+             FROM api_keys
+             WHERE key_hash = $1
+               AND revoked_at IS NULL
+               AND (expires_at IS NULL OR expires_at > NOW())",
+        )
+        .bind(key_hash)
+        .fetch_optional(&self.pool)).await.map_err(anyhow::Error::from)?;
+
+        if let Some(row) = row {
+            return Ok(Some(ApiKeyRecord {
+                id: row.try_get("id")?,
+                key_hash: row.try_get("key_hash")?,
+                label: row.try_get("label")?,
+                created_at: row.try_get("created_at")?,
+                expires_at: row.try_get("expires_at")?,
+                revoked_at: row.try_get("revoked_at")?,
+            }));
+        }
+
+        Ok(None)
+    }
+
+    /// Hard-delete all keys where `expires_at <= NOW()` and `expires_at IS NOT NULL`.
+    /// Returns the number of rows deleted.
+    pub async fn api_key_delete_expired(&self) -> anyhow::Result<u64> {
+        let result = self.with_timeout("api_key_delete_expired", sqlx::query(
+            "DELETE FROM api_keys
+             WHERE expires_at IS NOT NULL AND expires_at <= NOW()",
+        )
+        .execute(&self.pool)).await.map_err(anyhow::Error::from)?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// List all active (non-revoked, non-expired) API keys.
+    pub async fn api_key_list_active(&self) -> anyhow::Result<Vec<ApiKeyRecord>> {
+        let rows = self.with_timeout("api_key_list_active", sqlx::query(
+            "SELECT id, key_hash, label, created_at, expires_at, revoked_at
+             FROM api_keys
+             WHERE revoked_at IS NULL
+               AND (expires_at IS NULL OR expires_at > NOW())
+             ORDER BY created_at DESC",
+        )
+        .fetch_all(&self.pool)).await.map_err(anyhow::Error::from)?;
+
+        let mut keys = Vec::with_capacity(rows.len());
+        for row in rows {
+            keys.push(ApiKeyRecord {
+                id: row.try_get("id")?,
+                key_hash: row.try_get("key_hash")?,
+                label: row.try_get("label")?,
+                created_at: row.try_get("created_at")?,
+                expires_at: row.try_get("expires_at")?,
+                revoked_at: row.try_get("revoked_at")?,
+            });
+        }
+
+        Ok(keys)
+    }
+
+    /// Compute the SHA-256 hex digest of a raw API key string.
+    /// Use this helper to hash keys before passing to `api_key_insert` or `api_key_validate`.
+    pub fn hash_api_key(raw_key: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(raw_key.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn db_error_timeout_display() {
+        let e = DbError::Timeout;
+        assert_eq!(e.to_string(), "database query timed out");
+    }
+
+    #[test]
+    fn db_error_pool_exhausted_display() {
+        let e = DbError::PoolExhausted;
+        assert_eq!(e.to_string(), "database connection pool exhausted");
+    }
+
+    #[test]
+    fn db_error_constraint_violation_display() {
+        let e = DbError::ConstraintViolation("duplicate key value".to_string());
+        assert!(e.to_string().contains("constraint violation"));
+        assert!(e.to_string().contains("duplicate key value"));
+    }
+
+    #[test]
+    fn from_sqlx_pool_timed_out_maps_to_pool_exhausted() {
+        let e = DbError::from(sqlx::Error::PoolTimedOut);
+        assert!(matches!(e, DbError::PoolExhausted));
+    }
+
+    #[test]
+    fn from_sqlx_other_maps_to_other() {
+        let e = DbError::from(sqlx::Error::RowNotFound);
+        assert!(matches!(e, DbError::Other(_)));
     }
 }

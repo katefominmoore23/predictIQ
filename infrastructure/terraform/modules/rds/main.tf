@@ -33,39 +33,59 @@ variable "allocated_storage" {
 }
 
 variable "backup_retention" {
-  type = number
+  type    = number
+  default = 7
+}
+
+variable "deletion_protection" {
+  type    = bool
+  default = false
+}
+
+variable "ecs_tasks_sg_id" {
+  type        = string
+  description = "Security group ID of the ECS tasks that are allowed to connect"
+}
+
+locals {
+  common_tags = {
+    Project   = "predictiq"
+    Environment = var.environment
+    Owner     = "infrastructure-team"
+    ManagedBy = "terraform"
+  }
 }
 
 resource "aws_db_subnet_group" "main" {
   name       = "predictiq-${var.environment}-db-subnet"
   subnet_ids = var.private_subnet_ids
 
-  tags = {
-    Name = "predictiq-${var.environment}-db-subnet-group"
-  }
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "predictiq-${var.environment}-db-subnet-group"
+    }
+  )
 }
 
 resource "aws_security_group" "rds" {
   name   = "predictiq-${var.environment}-rds-sg"
   vpc_id = var.vpc_id
 
+  # Inbound PostgreSQL from ECS tasks only
   ingress {
-    from_port   = 5432
-    to_port     = 5432
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/8"]
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [var.ecs_tasks_sg_id]
   }
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "predictiq-${var.environment}-rds-sg"
-  }
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "predictiq-${var.environment}-rds-sg"
+    }
+  )
 }
 
 resource "aws_db_instance" "main" {
@@ -84,15 +104,27 @@ resource "aws_db_instance" "main" {
   backup_retention_period = var.backup_retention
   backup_window           = "03:00-04:00"
   maintenance_window      = "mon:04:00-mon:05:00"
-  
+  deletion_protection     = var.environment == "prod" ? true : var.deletion_protection
+
   multi_az               = var.environment == "prod" ? true : false
   publicly_accessible    = false
   skip_final_snapshot    = var.environment != "prod"
   final_snapshot_identifier = var.environment == "prod" ? "predictiq-${var.environment}-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}" : null
 
-  tags = {
-    Name = "predictiq-${var.environment}-db"
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "predictiq-${var.environment}-db"
+    }
+  )
+
+  lifecycle {
+    prevent_destroy = true
   }
+}
+
+output "sg_id" {
+  value = aws_security_group.rds.id
 }
 
 output "endpoint" {

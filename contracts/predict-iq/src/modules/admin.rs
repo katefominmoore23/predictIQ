@@ -24,6 +24,42 @@ pub fn require_admin(e: &Env) -> Result<(), ErrorCode> {
     Ok(())
 }
 
+/// Step 1: current admin proposes a new owner. The new owner must call `accept_admin` to complete.
+pub fn propose_admin(e: &Env, new_admin: Address) -> Result<(), ErrorCode> {
+    require_admin(e)?;
+    e.storage()
+        .persistent()
+        .set(&ConfigKey::PendingAdmin, &new_admin);
+    bump_gov_ttl(e, &ConfigKey::PendingAdmin);
+    Ok(())
+}
+
+/// Step 2: the pending admin accepts ownership, completing the transfer.
+pub fn accept_admin(e: &Env, caller: Address) -> Result<(), ErrorCode> {
+    caller.require_auth();
+    let pending: Address = e
+        .storage()
+        .persistent()
+        .get(&ConfigKey::PendingAdmin)
+        .ok_or(ErrorCode::PendingTransferNotFound)?;
+    if pending != caller {
+        return Err(ErrorCode::NotPendingOwner);
+    }
+    set_admin(e, pending);
+    e.storage().persistent().remove(&ConfigKey::PendingAdmin);
+    Ok(())
+}
+
+/// Cancel a pending ownership transfer (current admin only).
+pub fn cancel_admin_transfer(e: &Env) -> Result<(), ErrorCode> {
+    require_admin(e)?;
+    if !e.storage().persistent().has(&ConfigKey::PendingAdmin) {
+        return Err(ErrorCode::PendingTransferNotFound);
+    }
+    e.storage().persistent().remove(&ConfigKey::PendingAdmin);
+    Ok(())
+}
+
 pub fn set_guardian(e: &Env, guardian: Address) -> Result<(), ErrorCode> {
     require_admin(e)?;
     e.storage()
@@ -51,15 +87,99 @@ pub fn set_governance_token(e: &Env, token: Address) -> Result<(), ErrorCode> {
     Ok(())
 }
 
-pub fn set_fee_admin(e: &Env, fee_admin: Address) -> Result<(), ErrorCode> {
-    require_admin(e)?;
-    e.storage()
-        .persistent()
-        .set(&ConfigKey::GuardianAccount, &fee_admin);
-    bump_gov_ttl(e, &ConfigKey::GuardianAccount);
-    Ok(())
+#[cfg(test)]
+mod ownership_transfer_tests {
+    use super::{accept_admin, cancel_admin_transfer, get_admin, propose_admin, set_admin};
+    use crate::errors::ErrorCode;
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+
+    #[test]
+    fn successful_two_step_transfer() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let owner = Address::generate(&e);
+        let new_owner = Address::generate(&e);
+        set_admin(&e, owner.clone());
+
+        propose_admin(&e, new_owner.clone()).unwrap();
+        accept_admin(&e, new_owner.clone()).unwrap();
+
+        assert_eq!(get_admin(&e), Some(new_owner));
+    }
+
+    #[test]
+    fn wrong_address_cannot_accept() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let owner = Address::generate(&e);
+        let new_owner = Address::generate(&e);
+        let attacker = Address::generate(&e);
+        set_admin(&e, owner.clone());
+
+        propose_admin(&e, new_owner.clone()).unwrap();
+        let err = accept_admin(&e, attacker).unwrap_err();
+        assert_eq!(err, ErrorCode::NotPendingOwner);
+        // Original owner unchanged
+        assert_eq!(get_admin(&e), Some(owner));
+    }
+
+    #[test]
+    fn admin_can_cancel_pending_transfer() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let owner = Address::generate(&e);
+        let new_owner = Address::generate(&e);
+        set_admin(&e, owner.clone());
+
+        propose_admin(&e, new_owner).unwrap();
+        cancel_admin_transfer(&e).unwrap();
+
+        // Accepting after cancellation should fail
+        let err = cancel_admin_transfer(&e).unwrap_err();
+        assert_eq!(err, ErrorCode::PendingTransferNotFound);
+        assert_eq!(get_admin(&e), Some(owner));
+    }
+
+    #[test]
+    fn accept_without_proposal_fails() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let owner = Address::generate(&e);
+        set_admin(&e, owner);
+        let caller = Address::generate(&e);
+        let err = accept_admin(&e, caller).unwrap_err();
+        assert_eq!(err, ErrorCode::PendingTransferNotFound);
+    }
 }
 
-pub fn get_fee_admin(e: &Env) -> Option<Address> {
-    e.storage().persistent().get(&ConfigKey::GuardianAccount)
+/// Issue #1195: admin::set_fee_admin/get_fee_admin used to write/read
+/// ConfigKey::GuardianAccount — the same key set_guardian/get_guardian use —
+/// instead of the dedicated ConfigKey::FeeAdmin key that fees::set_fee_admin
+/// correctly uses. The landmine functions have been removed; this test
+/// confirms the guardian address is never touched by the real fee-admin flow.
+#[cfg(test)]
+mod fee_admin_guardian_isolation_tests {
+    use super::{get_guardian, set_admin, set_guardian};
+    use crate::modules::fees;
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+
+    #[test]
+    fn fee_admin_flow_does_not_affect_guardian_address() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let owner = Address::generate(&e);
+        set_admin(&e, owner);
+
+        let guardian = Address::generate(&e);
+        set_guardian(&e, guardian.clone()).unwrap();
+
+        let fee_admin = Address::generate(&e);
+        fees::set_fee_admin(&e, fee_admin.clone()).unwrap();
+
+        // The guardian address must be unchanged by the fee-admin flow, and
+        // the fee-admin and guardian addresses must be independently readable.
+        assert_eq!(get_guardian(&e), Some(guardian));
+        assert_eq!(fees::get_fee_admin(&e), Some(fee_admin));
+    }
 }

@@ -1,5 +1,5 @@
 use crate::errors::ErrorCode;
-use crate::modules::{markets, resolution};
+use crate::modules::markets;
 use crate::types::{ConfigKey, MarketStatus};
 use soroban_sdk::{contracttype, Address, Env};
 
@@ -23,15 +23,15 @@ pub fn file_dispute(e: &Env, disciplinarian: Address, market_id: u64) -> Result<
     let pending_ts = market
         .pending_resolution_timestamp
         .ok_or(ErrorCode::ResolutionNotReady)?;
-    if e.ledger().timestamp() >= pending_ts + resolution::get_dispute_window() {
-        // Issue #8: window is now configurable (default 72h)
+    let dispute_window = markets::get_market_dispute_window(e, market_id);
+    if e.ledger().timestamp() >= pending_ts + dispute_window {
         return Err(ErrorCode::DisputeWindowClosed);
     }
 
     market.status = MarketStatus::Disputed;
     market.dispute_timestamp = Some(e.ledger().timestamp());
     // Extend resolution deadline by the full dispute window duration
-    market.resolution_deadline += resolution::get_dispute_window();
+    market.resolution_deadline += dispute_window;
     let new_deadline = market.resolution_deadline;
 
     markets::update_market(e, market);
@@ -46,6 +46,14 @@ pub fn file_dispute(e: &Env, disciplinarian: Address, market_id: u64) -> Result<
 /// Issue #35: Calculate and emit actual total payout.
 pub fn resolve_market(e: &Env, market_id: u64, winning_outcome: u32) -> Result<(), ErrorCode> {
     let mut market = markets::get_market(e, market_id).ok_or(ErrorCode::MarketNotFound)?;
+
+    // Issue #1186: Resolved/Cancelled are terminal states (INVARIANTS.md §3) and
+    // must never be re-entered. Without this guard an admin could call this path
+    // twice with different outcomes after bettors already claimed under the
+    // first outcome, allowing overpayment against unchanged total_staked.
+    if market.status == MarketStatus::Resolved || market.status == MarketStatus::Cancelled {
+        return Err(ErrorCode::CannotChangeOutcome);
+    }
 
     if winning_outcome >= market.options.len() {
         return Err(ErrorCode::InvalidOutcome);

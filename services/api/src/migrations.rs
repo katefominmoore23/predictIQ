@@ -15,7 +15,14 @@
 use anyhow::{bail, Context};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use tracing::{info, warn};
+use tracing::info;
+
+/// Returns true when the `MIGRATE_DRY_RUN` environment variable is set to `"true"`.
+fn is_dry_run() -> bool {
+    std::env::var("MIGRATE_DRY_RUN")
+        .map(|v| v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
 
 /// A single migration file embedded at compile time.
 #[derive(Debug, Clone)]
@@ -87,6 +94,46 @@ const MIGRATIONS: &[Migration] = &[
         name: "008_create_email_tracking",
         sql: include_str!("../database/migrations/008_create_email_tracking.sql"),
     },
+    Migration {
+        version: "011",
+        name: "011_create_markets",
+        sql: include_str!("../database/migrations/011_create_markets.sql"),
+    },
+    Migration {
+        version: "017",
+        name: "017_create_email_dead_letter_jobs",
+        sql: include_str!("../database/migrations/017_create_email_dead_letter_jobs.sql"),
+    },
+    Migration {
+        version: "017b",
+        name: "017_add_soft_delete_markets",
+        sql: include_str!("../database/migrations/017_add_soft_delete_markets.sql"),
+    },
+    Migration {
+        version: "017c",
+        name: "017_add_analytics_events_market_id",
+        sql: include_str!("../database/migrations/017_add_analytics_events_market_id.sql"),
+    },
+    Migration {
+        version: "018",
+        name: "018_add_email_tracking_email_status_index",
+        sql: include_str!("../database/migrations/018_add_email_tracking_email_status_index.sql"),
+    },
+    Migration {
+        version: "018b",
+        name: "018_add_varchar_constraints",
+        sql: include_str!("../database/migrations/018_add_varchar_constraints.sql"),
+    },
+    Migration {
+        version: "019",
+        name: "019_add_newsletter_confirmed_at_index",
+        sql: include_str!("../database/migrations/019_add_newsletter_confirmed_at_index.sql"),
+    },
+    Migration {
+        version: "020",
+        name: "020_add_audit_log_actor_time_index",
+        sql: include_str!("../database/migrations/020_add_audit_log_actor_time_index.sql"),
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -103,8 +150,82 @@ impl<'a> MigrationRunner<'a> {
     /// Ensure the tracking table exists, then apply every pending migration.
     /// Already-applied migrations are skipped. Returns the number of newly
     /// applied migrations.
+    ///
+    /// When `MIGRATE_DRY_RUN=true` is set, pending migration SQL is printed to
+    /// stdout and no changes are made to the database. Returns 0 in dry-run mode.
+    ///
+    /// Uses a PostgreSQL session-level advisory lock to serialize concurrent
+    /// invocations (e.g. multiple instances starting simultaneously). If another
+    /// instance already holds the lock, this call aborts with an error so the
+    /// caller can surface it and halt startup cleanly.
     pub async fn run(&self) -> anyhow::Result<usize> {
+        if is_dry_run() {
+            return self.dry_run().await;
+        }
         self.ensure_tracking_table().await?;
+
+        // Stable lock key — chosen to be unique to this codebase.
+        const MIGRATION_LOCK_KEY: i64 = 0x7072_6564_6963_7471_u64 as i64;
+
+        let mut lock_conn = self
+            .pool
+            .acquire()
+            .await
+            .context("acquire advisory lock connection")?;
+
+        let locked: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock($1)")
+            .bind(MIGRATION_LOCK_KEY)
+            .fetch_one(&mut *lock_conn)
+            .await
+            .context("acquire migration advisory lock")?;
+
+        if !locked {
+            bail!(
+                "another instance holds the migration advisory lock — \
+                 aborting to prevent concurrent migration execution"
+            );
+        }
+
+        let result = self.run_inner().await;
+
+        // Always release the lock, even on failure, before the connection
+        // returns to the pool (session-level locks survive pool reuse).
+        let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
+            .bind(MIGRATION_LOCK_KEY)
+            .execute(&mut *lock_conn)
+            .await;
+
+        result
+    }
+
+    /// Print SQL for every pending migration without executing anything.
+    /// Called automatically when `MIGRATE_DRY_RUN=true`.
+    async fn dry_run(&self) -> anyhow::Result<usize> {
+        self.ensure_tracking_table().await?;
+
+        let mut pending = 0usize;
+        for migration in MIGRATIONS {
+            if self.is_applied(migration.version).await? {
+                info!(version = migration.version, "migration already applied — skipping");
+                continue;
+            }
+            warn!(
+                version = migration.version,
+                name = migration.name,
+                "[DRY RUN] would apply migration"
+            );
+            println!(
+                "-- [DRY RUN] migration {} ({})\n{}\n",
+                migration.version, migration.name, migration.sql
+            );
+            pending += 1;
+        }
+        info!(pending, "[DRY RUN] migration run complete — no changes applied");
+        Ok(0)
+    }
+
+    async fn run_inner(&self) -> anyhow::Result<usize> {
+        self.verify_checksums().await?;
 
         let mut applied = 0usize;
 
@@ -123,6 +244,58 @@ impl<'a> MigrationRunner<'a> {
 
         info!(applied, "migration run complete");
         Ok(applied)
+    }
+
+    /// Compare the SHA-256 of each embedded migration against the stored
+    /// checksum in `schema_migrations`. Bail with a FATAL error on any mismatch
+    /// so a manually edited migration file is caught before it can run.
+    async fn verify_checksums(&self) -> anyhow::Result<()> {
+        let applied = sqlx::query_as::<_, AppliedMigration>(
+            "SELECT version, name, applied_at, checksum
+             FROM schema_migrations
+             ORDER BY version ASC",
+        )
+        .fetch_all(self.pool)
+        .await
+        .context("failed to query schema_migrations for checksum verification")?;
+
+        for record in &applied {
+            let Some(migration) = MIGRATIONS.iter().find(|m| m.version == record.version) else {
+                // Migration applied in a previous version of the binary; skip.
+                warn!(
+                    version = %record.version,
+                    "applied migration not found in current binary — skipping checksum check"
+                );
+                continue;
+            };
+
+            let expected = hex::encode(Sha256::digest(migration.sql.as_bytes()));
+            if expected != record.checksum {
+                tracing::error!(
+                    version = %record.version,
+                    name = %record.name,
+                    stored_checksum = %record.checksum,
+                    computed_checksum = %expected,
+                    "FATAL: migration checksum mismatch — the embedded SQL differs from what \
+                     was applied. The migration file must not be modified after being applied."
+                );
+                bail!(
+                    "migration checksum mismatch for version {} ({}): \
+                     stored={}, computed={}",
+                    record.version,
+                    record.name,
+                    record.checksum,
+                    expected
+                );
+            }
+
+            info!(
+                version = %record.version,
+                "checksum verified"
+            );
+        }
+
+        Ok(())
     }
 
     /// Return the list of applied migrations from the tracking table.

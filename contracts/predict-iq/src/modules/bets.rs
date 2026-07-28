@@ -1,6 +1,6 @@
 use crate::errors::ErrorCode;
 use crate::modules::{markets, sac};
-use crate::types::{Bet, MarketStatus, BET_TTL_LOW_THRESHOLD, BET_TTL_HIGH_THRESHOLD};
+use crate::types::{Bet, MarketStatus, BET_TTL_HIGH_THRESHOLD, BET_TTL_LOW_THRESHOLD};
 use soroban_sdk::{contracttype, Address, Env};
 
 /// TTL Strategy for per-user bet records (Issue #100)
@@ -29,7 +29,6 @@ use soroban_sdk::{contracttype, Address, Env};
 ///
 /// Claimed(u64, Address) sentinel records use the same TTL so the
 /// AlreadyClaimed guard remains valid for the full prune grace period.
-
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -101,6 +100,9 @@ pub fn place_bet(
         return Err(ErrorCode::InvalidBetAmount);
     }
 
+    // Check if user's tokens are frozen for SAC-wrapped assets
+    sac::check_token_not_frozen(e, &token_address, &bettor)?;
+
     sac::safe_transfer(
         e,
         &token_address,
@@ -112,11 +114,11 @@ pub fn place_bet(
     // Deduct protocol fee from the bet amount before crediting the pool.
     // This ensures total_staked always reflects the net distributable pool,
     // so the parimutuel formula pays out the correct proportional share.
-    let fee = crate::modules::fees::calculate_tiered_fee(e, amount, &market.tier);
+    let fee = crate::modules::fees::calculate_tiered_fee(e, amount, &market.tier)?;
     let net_amount = amount - fee;
 
     if fee > 0 {
-        crate::modules::fees::collect_fee(e, token_address.clone(), fee);
+        crate::modules::fees::collect_fee(e, token_address.clone(), fee)?;
     }
 
     let bet_key = DataKey::Bet(market_id, bettor.clone(), outcome);
@@ -129,20 +131,33 @@ pub fn place_bet(
     });
 
     // Store the net (post-fee) amount so the payout formula is always correct.
-    existing_bet.amount = existing_bet.amount.checked_add(net_amount).ok_or(ErrorCode::ArithmeticOverflow)?;
-    existing_bet.fee_paid += fee;
+    existing_bet.amount = existing_bet
+        .amount
+        .checked_add(net_amount)
+        .ok_or(ErrorCode::ArithmeticOverflow)?;
+    existing_bet.fee_paid = existing_bet
+        .fee_paid
+        .checked_add(fee)
+        .ok_or(ErrorCode::ArithmeticOverflow)?;
     existing_bet.outcome = outcome;
-    market.total_staked = market.total_staked.checked_add(net_amount).ok_or(ErrorCode::ArithmeticOverflow)?;
+    market.total_staked = market
+        .total_staked
+        .checked_add(net_amount)
+        .ok_or(ErrorCode::ArithmeticOverflow)?;
 
-    let outcome_stake = markets::get_outcome_stake(e, market_id, outcome);
-    markets::set_outcome_stake(e, market_id, outcome, outcome_stake.checked_add(net_amount).ok_or(ErrorCode::ArithmeticOverflow)?);
-    markets::increment_outcome_bet_count(e, market_id, outcome);
+    let outcome_stake = markets::get_outcome_stake(&market, outcome);
+    markets::set_outcome_stake(
+        &mut market,
+        outcome,
+        outcome_stake
+            .checked_add(net_amount)
+            .ok_or(ErrorCode::ArithmeticOverflow)?,
+    );
 
     // Issue #24: Maintain actual winner count per outcome
     let is_new_bettor = existing_bet.amount == net_amount; // first bet on this outcome
     if is_new_bettor {
-        let current_count = market.winner_counts.get(outcome).unwrap_or(0);
-        market.winner_counts.set(outcome, current_count + 1);
+        markets::increment_outcome_bet_count(&mut market, outcome);
     }
 
     e.storage().persistent().set(&bet_key, &existing_bet);
@@ -153,7 +168,7 @@ pub fn place_bet(
     // Track referral reward — 10% of the protocol fee goes to the referrer.
     if let Some(ref r) = referrer {
         if fee > 0 {
-            crate::modules::fees::add_referral_reward(e, r, &token_address, fee);
+            crate::modules::fees::add_referral_reward(e, r, &token_address, fee)?;
         }
         // Store referrer so cancellation can reverse the reward if needed.
         let referrer_key = DataKey::BetReferrer(market_id, bettor.clone(), outcome);
@@ -235,6 +250,11 @@ fn internal_claim_amount(
 pub fn claim_winnings(e: &Env, bettor: Address, market_id: u64) -> Result<i128, ErrorCode> {
     bettor.require_auth();
 
+    // Claiming moves funds out of the contract, so it must respect the circuit
+    // breaker just like place_bet and withdraw_refund — a paused contract must
+    // not allow any token egress.
+    crate::modules::circuit_breaker::require_not_paused_for_high_risk(e)?;
+
     let market = markets::get_market(e, market_id).ok_or(ErrorCode::MarketNotFound)?;
 
     if market.status != MarketStatus::Resolved {
@@ -267,11 +287,16 @@ pub fn claim_winnings(e: &Env, bettor: Address, market_id: u64) -> Result<i128, 
     // Parimutuel payout: winner's proportional share of the total pool.
     // winnings = (bet.amount * total_staked) / winning_outcome_stake
     // Integer division truncates down, favouring the protocol.
-    let winning_outcome_stake = markets::get_outcome_stake(e, market_id, winning_outcome);
-    let winning_outcome_stake = if winning_outcome_stake > 0 { winning_outcome_stake } else { bet.amount };
-    
+    let winning_outcome_stake = markets::get_outcome_stake(&market, winning_outcome);
+    let winning_outcome_stake = if winning_outcome_stake > 0 {
+        winning_outcome_stake
+    } else {
+        bet.amount
+    };
+
     // Issue #192: Use checked arithmetic to prevent overflow in high-inflation scenarios
-    let winnings = bet.amount
+    let winnings = bet
+        .amount
         .checked_mul(market.total_staked)
         .and_then(|product| product.checked_div(winning_outcome_stake))
         .ok_or(ErrorCode::ArithmeticOverflow)?;
@@ -325,16 +350,52 @@ pub fn withdraw_refund(
         .get(&bet_key)
         .ok_or(ErrorCode::MarketNotFound)?;
 
-    let refund_amount = bet.amount;
+    // Issue #51: Creator reclaims their locked creation deposit (once only).
+    if bettor == market.creator && market.creation_deposit > 0 {
+        let deposit = market.creation_deposit;
+        market.creation_deposit = 0;
+        sac::safe_transfer(
+            e,
+            &token_address,
+            &e.current_contract_address(),
+            &bettor,
+            &deposit,
+        )?;
+        e.events().publish(
+            (
+                soroban_sdk::Symbol::new(e, "deposit_refunded"),
+                market_id,
+                bettor.clone(),
+            ),
+            deposit,
+        );
+    }
+
+    let net_amount = bet.amount;
+    let fee_paid = bet.fee_paid;
     let bet_outcome = bet.outcome;
+    // Gross refund = net stake + protocol fee deducted at bet time.
+    let refund_amount = net_amount
+        .checked_add(fee_paid)
+        .ok_or(ErrorCode::ArithmeticOverflow)?;
 
     // Update market accounting to maintain accuracy
-    market.total_staked = market.total_staked.saturating_sub(refund_amount);
+    market.total_staked = market.total_staked.saturating_sub(net_amount);
     let outcome_stake = market.outcome_stakes.get(bet_outcome).unwrap_or(0);
     market
         .outcome_stakes
-        .set(bet_outcome, outcome_stake.saturating_sub(refund_amount));
+        .set(bet_outcome, outcome_stake.saturating_sub(net_amount));
     markets::update_market(e, market);
+
+    // Reverse the protocol fee revenue so accounting stays consistent.
+    crate::modules::fees::reverse_fee(e, token_address.clone(), fee_paid);
+
+    // Reverse any referral reward credited when this bet was placed — a
+    // referrer only earns rewards from markets that complete, not cancelled ones.
+    if let Some(referrer) = get_bet_referrer(e, market_id, bettor.clone(), bet_outcome) {
+        crate::modules::fees::reverse_referral_reward(e, &referrer, &token_address, fee_paid);
+        remove_bet_referrer(e, market_id, &bettor, bet_outcome);
+    }
 
     internal_claim_amount(
         e,

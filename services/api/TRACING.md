@@ -10,16 +10,57 @@ This service implements distributed tracing using OpenTelemetry to track request
 - Automatic span creation at service boundaries
 - Request correlation with trace IDs
 
+## Endpoint Validation
+
+`OTEL_EXPORTER_OTLP_ENDPOINT` is validated as a parseable URL at startup.
+An invalid value (e.g. `not-a-url`) causes the service to **exit immediately**
+with a clear error rather than failing silently during the first export.
+
+After the tracing subscriber is initialised, a **TCP connectivity check**
+(2-second timeout) is attempted against the configured endpoint.
+If the endpoint is unreachable the service **continues to start** but:
+
+- Logs a `WARN` message referencing the endpoint and error.
+- Increments `otel_export_errors_total{reason="unreachable"}`.
+
+Monitor that counter to detect collector outages before they cause silent
+data loss in production.
+
+## Prometheus Metrics
+
+| Metric | Labels | Description |
+|---|---|---|
+| `otel_export_errors_total` | `reason` | Export failures — `unreachable` (startup TCP check), `export_failed` (runtime) |
+
 ## Configuration
 
 Configure tracing via environment variables:
 
 ```bash
 # OTLP endpoint (leave unset to disable trace export)
-OTLP_ENDPOINT=http://localhost:4317
+# Must be a valid URL — invalid values fail the service at startup.
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
-# Sampling rate (0.0 to 1.0)
-# 0.1 = 10% of requests, 1.0 = 100% of requests
+# ── Sampling (OTel standard env vars — preferred) ────────────────────────────
+# OTEL_TRACES_SAMPLER selects the sampler strategy.
+# OTEL_TRACES_SAMPLER_ARG sets the ratio for ratio-based samplers (0.0–1.0).
+# These take precedence over TRACE_SAMPLE_RATE when set.
+#
+# Default for production: traceidratio at 10% (0.1)
+OTEL_TRACES_SAMPLER=traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.1
+
+# Supported OTEL_TRACES_SAMPLER values:
+#   always_on                — 100% sampling
+#   always_off               — 0% sampling
+#   traceidratio             — ratio set by OTEL_TRACES_SAMPLER_ARG
+#   parentbased_always_on    — 100% sampling
+#   parentbased_always_off   — 0% sampling
+#   parentbased_traceidratio — ratio set by OTEL_TRACES_SAMPLER_ARG
+
+# ── Legacy fallback ──────────────────────────────────────────────────────────
+# TRACE_SAMPLE_RATE is used when OTEL_TRACES_SAMPLER is not set.
+# Default: 0.1 (10%)
 TRACE_SAMPLE_RATE=0.1
 
 # Environment name for trace metadata
@@ -90,19 +131,21 @@ When making HTTP requests to other services, the trace context is automatically 
 
 ### Always On (Development)
 ```bash
-TRACE_SAMPLE_RATE=1.0
+OTEL_TRACES_SAMPLER=always_on
 ```
 Traces 100% of requests. Use for development and debugging.
 
-### Ratio-Based (Production)
+### Ratio-Based (Production) — default
 ```bash
-TRACE_SAMPLE_RATE=0.1
+OTEL_TRACES_SAMPLER=traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.1
 ```
-Traces 10% of requests. Reduces overhead while maintaining visibility.
+Traces 10% of requests. This is the **default** when no sampler is configured.
+Reduces overhead while maintaining visibility.
 
 ### Always Off (Disabled)
 ```bash
-TRACE_SAMPLE_RATE=0.0
+OTEL_TRACES_SAMPLER=always_off
 # or unset OTLP_ENDPOINT
 ```
 Disables trace export. Tracing instrumentation remains but spans are not exported.
@@ -158,10 +201,17 @@ let response = client
 
 ### Sampling
 
-In production, use a low sampling rate (0.01 - 0.1) to reduce overhead:
+In production, use a low sampling rate (0.01–0.1) to reduce overhead.
+The default is **10 %** when no sampler env vars are set.
 
 ```bash
-TRACE_SAMPLE_RATE=0.05  # 5% of requests
+# 10% (default)
+OTEL_TRACES_SAMPLER=traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.1
+
+# 5%
+OTEL_TRACES_SAMPLER=traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.05
 ```
 
 ### Backend
@@ -192,19 +242,23 @@ Tracing adds minimal overhead:
 
 ### Traces not appearing
 
-1. Check OTLP endpoint is reachable:
+1. Check `otel_export_errors_total` in `/metrics` — any non-zero value means
+   the startup connectivity check failed.
+
+2. Check OTLP endpoint is reachable:
 ```bash
 curl http://localhost:4317
 ```
 
-2. Check API logs for tracing initialization:
+3. Check API logs for tracing initialization:
 ```
 Distributed tracing initialized service_name="predictiq-api"
 ```
 
-3. Verify sampling rate is > 0:
+4. Verify sampling rate is > 0:
 ```bash
-echo $TRACE_SAMPLE_RATE
+echo $OTEL_TRACES_SAMPLER_ARG   # OTel standard
+echo $TRACE_SAMPLE_RATE          # legacy fallback
 ```
 
 ### High memory usage

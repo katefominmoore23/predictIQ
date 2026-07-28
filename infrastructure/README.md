@@ -8,12 +8,20 @@ This directory contains all infrastructure definitions for PredictIQ using Terra
 infrastructure/
 ├── terraform/
 │   ├── main.tf              # Main configuration
-│   ├── variables.tf         # Variable definitions
+│   ├── variables.tf         # Variable definitions with validation
 │   ├── outputs.tf           # Output definitions
+│   ├── locals.tf            # Common tags and locals
+│   ├── bootstrap.sh         # Bootstrap script for state backend
+│   ├── backend-config.hcl   # Default backend configuration
 │   ├── environments/        # Environment-specific configurations
-│   │   ├── dev.tfvars
-│   │   ├── staging.tfvars
-│   │   └── prod.tfvars
+│   │   ├── README.md        # Environment separation documentation
+│   │   ├── dev.tfvars       # Development environment variables
+│   │   ├── staging/
+│   │   │   ├── terraform.tfvars
+│   │   │   └── backend.hcl
+│   │   └── production/
+│   │       ├── terraform.tfvars
+│   │       └── backend.hcl
 │   └── modules/             # Reusable modules
 │       ├── vpc/
 │       ├── rds/
@@ -30,15 +38,56 @@ infrastructure/
 - AWS CLI configured
 - Appropriate AWS IAM permissions
 - Access to Terraform state bucket
+- GitHub repository secrets configured (see Deployment Process section)
+
+## Required GitHub Secrets
+
+The deployment workflow requires the following secrets to be configured in repository settings:
+
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `AWS_ROLE_DEV` | IAM role ARN for dev environment | `arn:aws:iam::123456789:role/terraform-dev` |
+| `AWS_ROLE_STAGING` | IAM role ARN for staging environment | `arn:aws:iam::123456789:role/terraform-staging` |
+| `AWS_ROLE_PROD` | IAM role ARN for production environment | `arn:aws:iam::123456789:role/terraform-prod` |
+
+**Note:** The deploy workflow validates these secrets before attempting deployment. If any are missing, the workflow will fail with a clear error message.
 
 ## Quick Start
+
+### Bootstrap Terraform State Backend (First Time Only)
+
+Before initializing Terraform, you must create the S3 bucket and DynamoDB table for remote state management:
+
+```bash
+cd infrastructure/terraform
+
+# Bootstrap for development environment
+./bootstrap.sh us-east-1 dev
+
+# Bootstrap for staging environment
+./bootstrap.sh us-east-1 staging
+
+# Bootstrap for production environment
+./bootstrap.sh us-east-1 prod
+```
+
+The bootstrap script will:
+1. Create an S3 bucket for Terraform state
+2. Enable versioning and encryption on the bucket
+3. Block public access to the bucket
+4. Create a DynamoDB table for state locking
+5. Enable point-in-time recovery on the DynamoDB table
 
 ### Initialize Terraform
 
 ```bash
 cd infrastructure/terraform
-terraform init
+
+# Initialize with backend configuration
+terraform init -backend-config=backend-config.hcl
 ```
+
+**Note:** The `backend-config.hcl` file contains the S3 bucket and DynamoDB table names. Update this file if you used different names during bootstrap.
 
 ### Plan Infrastructure Changes
 
@@ -47,21 +96,31 @@ terraform init
 terraform plan -var-file="environments/dev.tfvars"
 
 # For staging environment
-terraform plan -var-file="environments/staging.tfvars"
+terraform plan -var-file="environments/staging/terraform.tfvars"
 
 # For production environment
-terraform plan -var-file="environments/prod.tfvars"
+terraform plan -var-file="environments/production/terraform.tfvars"
 ```
 
 ### Apply Infrastructure Changes
 
 ```bash
 # Apply changes (requires approval)
-terraform apply -var-file="environments/prod.tfvars"
+terraform apply -var-file="environments/production/terraform.tfvars"
 
 # Auto-approve (use with caution)
-terraform apply -auto-approve -var-file="environments/prod.tfvars"
+terraform apply -auto-approve -var-file="environments/production/terraform.tfvars"
 ```
+
+## Environment Separation
+
+PredictIQ uses separate Terraform state files and backends for each environment:
+
+- **Development**: Local state (for testing only)
+- **Staging**: Remote state in S3 with DynamoDB locking
+- **Production**: Remote state in separate S3 bucket with DynamoDB locking
+
+See `environments/README.md` for detailed environment management instructions.
 
 ## Environments
 
@@ -98,9 +157,11 @@ terraform apply -auto-approve -var-file="environments/prod.tfvars"
 - Encryption at rest
 
 ### Redis Module
-- ElastiCache cluster
-- Automatic failover
-- Parameter group configuration
+- ElastiCache **replication group** (Multi-AZ)
+- `automatic_failover_enabled = true` and `multi_az_enabled = true` by default
+- Minimum 2 cache clusters to support failover
+- **Failover RTO**: AWS promotes a read replica to primary in approximately **60–120 seconds**. During this window, write operations will fail; read-only operations served by replicas remain available. Applications should implement retry logic with exponential backoff (recommended: 3 retries, starting at 200 ms) to handle the failover window gracefully.
+- At-rest and in-transit encryption enabled
 - Subnet group for VPC placement
 
 ### ECS Module

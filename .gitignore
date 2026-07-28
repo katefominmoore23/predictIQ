@@ -1,9 +1,19 @@
 # Next.js build output
 frontend/.next/
+out/
+dist/
+build/
 
 # Dependencies
 node_modules/
 **/node_modules/
+
+# Logs and local diagnostics
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 /target
 **/*.rs.bk
@@ -11,6 +21,11 @@ node_modules/
 .env.*
 !.env.example
 .kiro/
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
 
 # E2E Test Artifacts
 frontend/playwright-report/
@@ -21,6 +36,18 @@ frontend/playwright/.cache/
 # Test snapshots
 **/__snapshots__/
 **/*.snap
+**/*.snap.new
+**/test-snapshots/
+**/testsnapshots/
+**/testSnapshots/
+
+# Coverage and cache output
+coverage/
+**/coverage/
+.nyc_output/
+**/.cache/
+.turbo/
+.pytest_cache/
 
 # Rust build artifacts
 contracts/**/target/
@@ -31,9 +58,26 @@ contracts/**/*.d
 # Cargo lock (regenerated per environment)
 Cargo.lock
 
+# Criterion benchmark output
+**/criterion/
+services/api/benches/.benchmarks/
 
 # Performance baselines (stored per branch)
 .performance-baselines/
+performance/.performance-baselines/
 
 # Gas benchmark baselines (stored per branch)
 contracts/predict-iq/.gas-benchmarks/
+
+# Temporary and editor files
+*.tmp
+*.bak
+*~
+.vscode/*.log
+
+# Shell scripts generated during debugging
+push_and_create_pr*.sh
+verify-e2e-setup.sh
+test_shutdown.sh
+test_shutdown.ps1
+test_rate_limit.sh
