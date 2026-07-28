@@ -150,6 +150,38 @@ describe("TTSService — circuit breaker", () => {
     expect(["open", "halfOpen"]).toContain(stateAfterProbe);
   }, 15_000);
 
+  it("does not open the breaker for repeated 4xx client errors (issue #1135)", async () => {
+    // A 400 response (e.g. invalid voice parameter) should be a non-retriable
+    // TTSProviderError, but must NOT count toward tripping the breaker —
+    // it's a client mistake, not upstream provider health degradation.
+    (global as any).fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      text: async () => "invalid voice parameter",
+    });
+
+    const svc = new TTSService({
+      provider: "elevenlabs",
+      elevenlabs: { apiKey: "test-key" },
+      outputDir: "/tmp/tts-cb-4xx-test",
+      circuitBreaker: {
+        openThreshold: 2,
+        rollingWindowMs: 30_000,
+        halfOpenIntervalMs: 60_000,
+        timeoutMs: 500,
+      },
+    });
+
+    // Fire well more than the failure threshold worth of 4xx errors.
+    for (let i = 0; i < 6; i++) {
+      await expect(svc.generate("hello", VOICE, "elevenlabs")).rejects.toThrow();
+    }
+
+    const states = svc.getCircuitBreakerStates();
+    expect(states["elevenlabs"].state).toBe("closed");
+  }, 15_000);
+
   it("getCircuitBreakerStates returns empty object when no providers are configured", () => {
     // No elevenlabs or google config → no breakers initialised
     const svc = new TTSService({

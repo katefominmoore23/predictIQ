@@ -80,6 +80,16 @@ jobs:
     strategy:
       matrix:
         environment: [dev, staging, prod]
+    env:
+      TF_VAR_db_username: ${{ secrets[format('DB_USERNAME_{0}', matrix.environment)] }}
+      TF_VAR_db_password: ${{ secrets[format('DB_PASSWORD_{0}', matrix.environment)] }}
+      TF_VAR_hmac_key: ${{ secrets[format('HMAC_KEY_{0}', matrix.environment)] }}
+      TF_VAR_sendgrid_api_key: ${{ secrets[format('SENDGRID_API_KEY_{0}', matrix.environment)] }}
+      TF_VAR_api_signing_key: ${{ secrets[format('API_SIGNING_KEY_{0}', matrix.environment)] }}
+      TF_VAR_acm_certificate_arn: ${{ secrets[format('ACM_CERTIFICATE_ARN_{0}', matrix.environment)] }}
+      TF_VAR_api_image_uri: ${{ secrets[format('API_IMAGE_URI_{0}', matrix.environment)] }}
+      TF_VAR_redis_auth_token: ${{ secrets[format('REDIS_AUTH_TOKEN_{0}', matrix.environment)] }}
+      TF_VAR_sendgrid_key_rotated_at: ${{ secrets[format('SENDGRID_KEY_ROTATED_AT_{0}', matrix.environment)] }}
     steps:
       - uses: actions/checkout@v4
 
@@ -138,6 +148,21 @@ jobs:
       matrix:
         environment: [dev, staging, prod]
       max-parallel: 1
+    # Ties each matrix leg to a GitHub Environment of the same name. Configure
+    # a "prod" environment with required reviewers in repo settings so that
+    # leg pauses for manual approval; dev/staging can stay unprotected and will
+    # keep auto-applying on merge to main, matching environments/README.md.
+    environment: ${{ matrix.environment }}
+    env:
+      TF_VAR_db_username: ${{ secrets[format('DB_USERNAME_{0}', matrix.environment)] }}
+      TF_VAR_db_password: ${{ secrets[format('DB_PASSWORD_{0}', matrix.environment)] }}
+      TF_VAR_hmac_key: ${{ secrets[format('HMAC_KEY_{0}', matrix.environment)] }}
+      TF_VAR_sendgrid_api_key: ${{ secrets[format('SENDGRID_API_KEY_{0}', matrix.environment)] }}
+      TF_VAR_api_signing_key: ${{ secrets[format('API_SIGNING_KEY_{0}', matrix.environment)] }}
+      TF_VAR_acm_certificate_arn: ${{ secrets[format('ACM_CERTIFICATE_ARN_{0}', matrix.environment)] }}
+      TF_VAR_api_image_uri: ${{ secrets[format('API_IMAGE_URI_{0}', matrix.environment)] }}
+      TF_VAR_redis_auth_token: ${{ secrets[format('REDIS_AUTH_TOKEN_{0}', matrix.environment)] }}
+      TF_VAR_sendgrid_key_rotated_at: ${{ secrets[format('SENDGRID_KEY_ROTATED_AT_{0}', matrix.environment)] }}
     steps:
       - uses: actions/checkout@v4
 
@@ -184,7 +209,13 @@ jobs:
 
       - name: Output infrastructure details
         working-directory: infrastructure/terraform
-        run: terraform output -json > /tmp/outputs-${{ matrix.environment }}.json
+        run: |
+          # Human-readable output still relies on Terraform's own `sensitive`
+          # redaction, so it's safe to print to the (already access-controlled) logs.
+          terraform output
+          # -json bypasses that redaction entirely, so strip the sensitive keys
+          # ourselves before anything touches disk / an uploaded artifact.
+          terraform output -json | jq 'del(.rds_endpoint, .redis_endpoint)' > /tmp/outputs-${{ matrix.environment }}.json
 
       - name: Upload outputs
         uses: actions/upload-artifact@v7

@@ -453,12 +453,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build API container image
-        run: docker build -t predictiq-api:${{ github.sha }} -f services/api/Dockerfile .
-        continue-on-error: true
+        run: docker build -t predictiq-api:${{ github.sha }} -f Dockerfile .
 
       - name: Scan API container with Trivy
         uses: aquasecurity/trivy-action@314ff8b43182423b84c50b1670b0e10f858f2d98 # master
-        if: success()
         with:
           image-ref: "predictiq-api:${{ github.sha }}"
           format: "sarif"
@@ -509,11 +507,7 @@ jobs:
 
       - name: Install Rust (for Rust analysis)
         if: matrix.language == 'rust'
-        uses: actions-rs/toolchain@63eb9591781c46a70274cb3ebdf190fce92702e8 # v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
@@ -538,6 +532,7 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
           components: clippy
 
       - name: Run Clippy
@@ -553,6 +548,7 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
           components: clippy
 
       - name: Clippy (deny warnings) — oracle module
@@ -584,6 +580,7 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
           components: rustfmt
 
       - name: Check formatting
@@ -599,6 +596,7 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
           target: wasm32-unknown-unknown
 
       - name: Install Soroban CLI

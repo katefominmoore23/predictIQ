@@ -196,8 +196,8 @@ pub fn create_market_with_dispute_window(
         let treasury = get_protocol_treasury(e);
         token_client.transfer(&creator, &treasury, &creation_fee);
 
-        // Emit fee collection event
-        crate::modules::events::emit_fee_collected(e, 0, treasury, creation_fee);
+        // Emit fee collection event, identifying both the token and the actual recipient
+        crate::modules::events::emit_fee_collected(e, 0, native_token.clone(), treasury, creation_fee);
     }
 
     // Lock deposit if required
@@ -467,6 +467,11 @@ pub fn prune_market(e: &Env, market_id: u64) -> Result<(), ErrorCode> {
     // Archive the market ID for off-chain indexers
     crate::modules::event_archive::archive_market(e, market_id);
 
+    // Clear all voting-state storage (votes, tallies, locked tokens/balances,
+    // dispute voter registry) so disputed-and-resolved markets don't leave an
+    // unbounded storage footprint behind after pruning.
+    crate::modules::voting::prune_market_voting_state(e, market_id, market.options.len());
+
     // Remove status index entry before dropping the market record.
     e.storage()
         .persistent()
@@ -482,4 +487,126 @@ pub fn prune_market(e: &Env, market_id: u64) -> Result<(), ErrorCode> {
     crate::modules::events::emit_market_pruned(e, market_id, current_time);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod markets_prune_tests {
+    use super::*;
+    use crate::modules::voting;
+    use crate::types::{LockedTokens, Vote};
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Map};
+
+    /// Builds and stores a disputed-then-resolved market directly (bypassing the
+    /// public create/dispute/resolve flow) with a voter's full voting-state
+    /// footprint (Vote, VoteTally, LockedTokens, LockedBalance, DisputeVoters).
+    fn seed_resolved_market_with_voting_state(e: &Env, market_id: u64, voter: &Address) {
+        let market = Market {
+            id: market_id,
+            creator: Address::generate(e),
+            description: String::from_str(e, "test market"),
+            options: Vec::from_array(
+                e,
+                [String::from_str(e, "Yes"), String::from_str(e, "No")],
+            ),
+            status: MarketStatus::Resolved,
+            deadline: 100,
+            resolution_deadline: 200,
+            winning_outcome: Some(0),
+            oracle_config: OracleConfig {
+                oracle_address: Address::generate(e),
+                feed_id: String::from_str(e, "test"),
+                min_responses: Some(1),
+                max_staleness_seconds: 3600,
+                max_confidence_bps: 100,
+                strike_price: None,
+            },
+            total_staked: 0,
+            payout_mode: crate::types::PayoutMode::Pull,
+            tier: MarketTier::Basic,
+            creation_deposit: 0,
+            parent_id: 0,
+            parent_outcome_idx: 0,
+            resolved_at: Some(0),
+            token_address: Address::generate(e),
+            outcome_stakes: Map::new(e),
+            pending_resolution_timestamp: None,
+            dispute_snapshot_ledger: None,
+            dispute_timestamp: Some(0),
+            winner_counts: Map::new(e),
+            total_claimed: 0,
+        };
+        e.storage().persistent().set(&DataKey::Market(market_id), &market);
+        e.storage()
+            .persistent()
+            .set(&DataKey::StatusIndex(market_id, MarketStatus::Resolved), &true);
+
+        // Seed the full voting-state footprint that `prune_market_voting_state`
+        // is responsible for clearing.
+        let voters = Vec::from_array(e, [voter.clone()]);
+        e.storage()
+            .persistent()
+            .set(&voting::DataKey::DisputeVoters(market_id), &voters);
+        e.storage().persistent().set(
+            &voting::DataKey::Vote(market_id, voter.clone()),
+            &Vote {
+                market_id,
+                voter: voter.clone(),
+                outcome: 0,
+                weight: 500,
+            },
+        );
+        e.storage().persistent().set(
+            &voting::DataKey::LockedTokens(market_id, voter.clone()),
+            &LockedTokens {
+                voter: voter.clone(),
+                market_id,
+                amount: 500,
+                unlock_time: 0,
+            },
+        );
+        e.storage()
+            .persistent()
+            .set(&voting::DataKey::LockedBalance(market_id, voter.clone()), &500i128);
+        e.storage()
+            .persistent()
+            .set(&voting::DataKey::VoteTally(market_id, 0), &500i128);
+    }
+
+    #[test]
+    fn prune_market_clears_voting_state() {
+        let e = Env::default();
+        let market_id = 1u64;
+        let voter = Address::generate(&e);
+
+        seed_resolved_market_with_voting_state(&e, market_id, &voter);
+
+        // Advance past the prune grace period.
+        e.ledger().set_timestamp(PRUNE_GRACE_PERIOD + 1);
+
+        prune_market(&e, market_id).unwrap();
+
+        assert!(!e
+            .storage()
+            .persistent()
+            .has(&voting::DataKey::DisputeVoters(market_id)));
+        assert!(!e
+            .storage()
+            .persistent()
+            .has(&voting::DataKey::Vote(market_id, voter.clone())));
+        assert!(!e
+            .storage()
+            .persistent()
+            .has(&voting::DataKey::LockedTokens(market_id, voter.clone())));
+        assert!(!e
+            .storage()
+            .persistent()
+            .has(&voting::DataKey::LockedBalance(market_id, voter.clone())));
+        assert!(!e
+            .storage()
+            .persistent()
+            .has(&voting::DataKey::VoteTally(market_id, 0)));
+
+        // The market record itself is gone too, as before this fix.
+        assert!(get_market(&e, market_id).is_none());
+    }
 }

@@ -125,3 +125,41 @@ describe("TTSService.enqueue — auth", () => {
     expect(() => svc.enqueue("hello", VOICE, undefined, "bad.jwt.token")).toThrow(AuthError);
   });
 });
+
+// ---------------------------------------------------------------------------
+// TTSService — cross-tenant job isolation (#1130)
+// ---------------------------------------------------------------------------
+
+describe("TTSService — cross-tenant job isolation", () => {
+  it("getJob returns undefined for a job owned by a different credential", () => {
+    const svc = makeService(API_KEY_CONFIG);
+    const jobId = svc.enqueue("secret narration for tenant A", VOICE, undefined, "key-abc");
+
+    expect(svc.getJob(jobId, "key-abc")).toBeDefined();
+    expect(svc.getJob(jobId, "key-xyz")).toBeUndefined();
+  });
+
+  it("listJobs only returns jobs belonging to the requesting credential", () => {
+    const svc = makeService(API_KEY_CONFIG);
+    const jobA = svc.enqueue("tenant A job", VOICE, undefined, "key-abc");
+    const jobB = svc.enqueue("tenant B job", VOICE, undefined, "key-xyz");
+
+    const jobsForA = svc.listJobs(undefined, "key-abc").map((j) => j.id);
+    const jobsForB = svc.listJobs(undefined, "key-xyz").map((j) => j.id);
+
+    expect(jobsForA).toContain(jobA);
+    expect(jobsForA).not.toContain(jobB);
+    expect(jobsForB).toContain(jobB);
+    expect(jobsForB).not.toContain(jobA);
+  });
+
+  it("listAllJobsUnscoped returns jobs across every tenant", () => {
+    const svc = makeService(API_KEY_CONFIG);
+    const jobA = svc.enqueue("tenant A job", VOICE, undefined, "key-abc");
+    const jobB = svc.enqueue("tenant B job", VOICE, undefined, "key-xyz");
+
+    const ids = svc.listAllJobsUnscoped().map((j) => j.id);
+    expect(ids).toContain(jobA);
+    expect(ids).toContain(jobB);
+  });
+});
