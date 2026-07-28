@@ -7,6 +7,7 @@ describe('useI18n', () => {
     // Reset singleton and storage before each test
     i18n.setLocale('en');
     localStorage.clear();
+    document.documentElement.lang = '';
   });
 
   it('initialises with en locale', async () => {
@@ -14,6 +15,13 @@ describe('useI18n', () => {
 
     await waitFor(() => expect(result.current.locale).toBe('en'));
     expect(i18n.getLocale()).toBe('en');
+  });
+
+  it('sets document.documentElement.lang to the initial locale', async () => {
+    const { result } = renderHook(() => useI18n());
+
+    await waitFor(() => expect(result.current.locale).toBe('en'));
+    expect(document.documentElement.lang).toBe('en');
   });
 
   describe('setLocale with implemented locale (en)', () => {

@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import LandingPage from '../LandingPage';
-import { api } from '../../lib/api/client';
+import { api } from '../../lib/api/public-client';
 
 describe('LandingPage data-driven sections', () => {
   beforeEach(() => {

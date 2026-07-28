@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import LandingPage from '../LandingPage';
-import { api } from '../../lib/api/client';
+import { api } from '../../lib/api/public-client';
 
 const originalFetch = global.fetch;
 

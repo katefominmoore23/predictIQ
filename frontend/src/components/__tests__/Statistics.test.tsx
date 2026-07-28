@@ -2,10 +2,10 @@ import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { Statistics } from '../Statistics';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { api } from '../../lib/api/client';
+import { api } from '../../lib/api/public-client';
 
 // Mock the API
-jest.mock('../../lib/api/client', () => ({
+jest.mock('../../lib/api/public-client', () => ({
   api: {
     getStatistics: jest.fn(),
   },

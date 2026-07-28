@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { axe, toHaveNoViolations } from 'jest-axe';
 import LandingPage from '../LandingPage';
-import { api } from '../../lib/api/client';
+import { api } from '../../lib/api/public-client';
 
 expect.extend(toHaveNoViolations);
 
