@@ -564,11 +564,15 @@ impl EmailQueue {
             .await?;
 
         // Derive a stable idempotency key for this job so retries never
-        // produce duplicate sends within the configured TTL window.
+        // produce duplicate sends within the configured TTL window. The key
+        // is bucketed off the job's original creation time (not "now") so
+        // that a retry delayed past an hour boundary by exponential backoff
+        // still computes the same key as earlier attempts of the same job.
         let idem = idempotency_key(
             &job.recipient_email,
             &job.template_name,
             &service.idempotency_secret,
+            job.created_at,
         );
 
         // Send email (deduplication handled inside send_email_idempotent)

@@ -10,11 +10,12 @@ jobs:
   rust-licenses-contracts:
     name: Rust License Check — contracts/predict-iq
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -34,11 +35,12 @@ jobs:
   rust-licenses-api:
     name: Rust License Check — services/api
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -58,6 +60,7 @@ jobs:
   npm-licenses-frontend:
     name: NPM License Check — frontend
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -89,6 +92,7 @@ jobs:
   npm-licenses-tts:
     name: NPM License Check — services/tts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -125,6 +129,7 @@ jobs:
       - npm-licenses-frontend
       - npm-licenses-tts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Success
         run: echo "All dependency licenses are compliant."

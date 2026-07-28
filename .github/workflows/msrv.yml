@@ -16,6 +16,7 @@ jobs:
   msrv:
     name: Build with Minimum Supported Rust Version
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +28,7 @@ jobs:
           echo "MSRV detected: $MSRV"
 
       - name: Install MSRV toolchain (${{ steps.msrv.outputs.version }})
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
 

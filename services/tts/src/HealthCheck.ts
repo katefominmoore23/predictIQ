@@ -264,7 +264,7 @@ export class HealthChecker {
   private checkJobStore(): HealthCheckStatus {
     try {
       // Verify job store is functional
-      const jobs = this.service.listJobs();
+      const jobs = this.service.listAllJobsUnscoped();
 
       return {
         status: "ok",
@@ -284,8 +284,8 @@ export class HealthChecker {
    */
   private checkJobQueueDepth(): HealthCheckStatus {
     try {
-      const pending = this.service.listJobs("pending").length;
-      const processing = this.service.listJobs("processing").length;
+      const pending = this.service.listAllJobsUnscoped("pending").length;
+      const processing = this.service.listAllJobsUnscoped("processing").length;
       const depth = pending + processing;
 
       if (depth >= MAX_QUEUE_DEPTH) {

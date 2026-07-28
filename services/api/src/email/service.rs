@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
 use redis::AsyncCommands as _;
 use serde_json::Value;
 use sha2::Sha256;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use validator::ValidateEmail;
 
 use crate::cache::RedisCache;
@@ -34,16 +35,24 @@ impl Default for IdempotencyConfig {
 /// - A server-side secret prevents pre-computation by external attackers.
 /// - The hour bucket bounds the validity window to ~1 hour per key rotation.
 ///
+/// `bucket_time` is the timestamp the hour bucket is derived from. Callers
+/// that retry the same logical job (e.g. the email queue worker) must pass
+/// the job's original creation time rather than the current time — otherwise
+/// a retry whose exponential backoff crosses an hour boundary would compute a
+/// different key and defeat deduplication for a job that already succeeded.
+///
 /// The key format is `email:idem:<hex(HMAC)>`.
-pub fn idempotency_key(recipient: &str, template_name: &str, secret: &str) -> String {
+pub fn idempotency_key(
+    recipient: &str,
+    template_name: &str,
+    secret: &str,
+    bucket_time: DateTime<Utc>,
+) -> String {
     type HmacSha256 = Hmac<Sha256>;
 
-    // Hour bucket: seconds-since-epoch / 3600, so keys rotate each hour.
-    let hour_bucket = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        / 3600;
+    // Hour bucket: seconds-since-epoch / 3600, so keys rotate each hour
+    // relative to `bucket_time` rather than wall-clock "now".
+    let hour_bucket = bucket_time.timestamp() / 3600;
 
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
         .expect("HMAC accepts any key length");
@@ -183,7 +192,7 @@ impl EmailService {
         template_name: &str,
         template_data: &Value,
     ) -> Result<String> {
-        let idem = idempotency_key(recipient, template_name, &self.idempotency_secret);
+        let idem = idempotency_key(recipient, template_name, &self.idempotency_secret, Utc::now());
         self.send_email_idempotent(recipient, template_name, template_data, Some(&idem))
             .await
     }
@@ -441,36 +450,40 @@ mod tests {
 
     #[test]
     fn same_inputs_produce_same_key() {
-        let k1 = idempotency_key("user@example.com", "welcome_email", "secret");
-        let k2 = idempotency_key("user@example.com", "welcome_email", "secret");
+        let now = Utc::now();
+        let k1 = idempotency_key("user@example.com", "welcome_email", "secret", now);
+        let k2 = idempotency_key("user@example.com", "welcome_email", "secret", now);
         assert_eq!(k1, k2);
     }
 
     #[test]
     fn different_recipient_produces_different_key() {
-        let k1 = idempotency_key("alice@example.com", "welcome_email", "secret");
-        let k2 = idempotency_key("bob@example.com", "welcome_email", "secret");
+        let now = Utc::now();
+        let k1 = idempotency_key("alice@example.com", "welcome_email", "secret", now);
+        let k2 = idempotency_key("bob@example.com", "welcome_email", "secret", now);
         assert_ne!(k1, k2);
     }
 
     #[test]
     fn different_template_produces_different_key() {
-        let k1 = idempotency_key("user@example.com", "welcome_email", "secret");
-        let k2 = idempotency_key("user@example.com", "newsletter_confirmation", "secret");
+        let now = Utc::now();
+        let k1 = idempotency_key("user@example.com", "welcome_email", "secret", now);
+        let k2 = idempotency_key("user@example.com", "newsletter_confirmation", "secret", now);
         assert_ne!(k1, k2);
     }
 
     /// #932: key changes when the secret changes.
     #[test]
     fn different_secret_produces_different_key() {
-        let k1 = idempotency_key("user@example.com", "welcome_email", "secret-a");
-        let k2 = idempotency_key("user@example.com", "welcome_email", "secret-b");
+        let now = Utc::now();
+        let k1 = idempotency_key("user@example.com", "welcome_email", "secret-a", now);
+        let k2 = idempotency_key("user@example.com", "welcome_email", "secret-b", now);
         assert_ne!(k1, k2, "key must change when the HMAC secret changes");
     }
 
     #[test]
     fn key_has_expected_prefix() {
-        let key = idempotency_key("user@example.com", "t", "secret");
+        let key = idempotency_key("user@example.com", "t", "secret", Utc::now());
         assert!(key.starts_with("email:idem:"), "key should start with email:idem: prefix");
     }
 
@@ -489,11 +502,49 @@ mod tests {
     /// Retry produces the same key (within the same hour bucket).
     #[test]
     fn retry_produces_same_idempotency_key() {
-        let key_attempt_1 = idempotency_key("user@example.com", "newsletter_confirmation", "secret");
-        let key_attempt_2 = idempotency_key("user@example.com", "newsletter_confirmation", "secret");
+        let created_at = Utc::now();
+        let key_attempt_1 = idempotency_key("user@example.com", "newsletter_confirmation", "secret", created_at);
+        let key_attempt_2 = idempotency_key("user@example.com", "newsletter_confirmation", "secret", created_at);
         assert_eq!(
             key_attempt_1, key_attempt_2,
             "retry must produce the same idempotency key"
+        );
+    }
+
+    /// #1129: a retry delayed past the 1-hour bucket boundary (e.g. by the
+    /// 6th exponential-backoff attempt, ~64 minutes out) must still compute
+    /// the same idempotency key as the original attempt, since both are
+    /// derived from the job's original creation time rather than "now".
+    #[test]
+    fn retry_key_is_stable_across_hour_boundary_when_derived_from_job_creation_time() {
+        let created_at = Utc::now();
+        let key_at_creation = idempotency_key("user@example.com", "newsletter_confirmation", "secret", created_at);
+
+        // Simulate a retry scheduled more than an hour after the original
+        // attempt (e.g. the ~64-minute delay of the 6th backoff attempt).
+        let delayed_retry_time = created_at + chrono::Duration::minutes(90);
+        let key_at_delayed_retry = idempotency_key(
+            "user@example.com",
+            "newsletter_confirmation",
+            "secret",
+            created_at, // bucket is still derived from the original creation time
+        );
+        assert_eq!(
+            key_at_creation, key_at_delayed_retry,
+            "idempotency key must remain stable across the job's full retry lifetime"
+        );
+
+        // Sanity check: had the key been derived from wall-clock "now" at the
+        // delayed retry time instead of the job's creation time, it would differ.
+        let key_from_wall_clock_now = idempotency_key(
+            "user@example.com",
+            "newsletter_confirmation",
+            "secret",
+            delayed_retry_time,
+        );
+        assert_ne!(
+            key_at_creation, key_from_wall_clock_now,
+            "test precondition: 90 minutes must cross an hour bucket boundary"
         );
     }
 
