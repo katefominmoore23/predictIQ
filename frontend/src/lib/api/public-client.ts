@@ -69,6 +69,7 @@ export const CacheTag = {
   BLOCKCHAIN: 'blockchain',
   NEWSLETTER: 'newsletter',
   EMAIL: 'email',
+  AUDIT: 'audit',
 } as const;
 
 function getRetryDelay(attempt: number, retryAfter?: number): number {
