@@ -208,6 +208,25 @@ export async function testKeyboardNavigation(page: Page, expectedFocusOrder: str
 }
 
 /**
+ * Wait for web fonts to finish loading before taking a screenshot.
+ * Font-loading timing differs between local dev and CI/Docker environments;
+ * without this, visual-regression comparisons can flake on sub-pixel text
+ * reflow even when nothing actually changed.
+ */
+export async function waitForFonts(page: Page, timeout = 5000) {
+  await page.evaluate(
+    async (timeoutMs) => {
+      if (!('fonts' in document)) return;
+      await Promise.race([
+        document.fonts.ready,
+        new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+      ]);
+    },
+    timeout
+  );
+}
+
+/**
  * Verify form validation
  */
 export async function verifyFormValidation(page: Page, inputLabel: string, invalidValue: string, expectedError: string) {
