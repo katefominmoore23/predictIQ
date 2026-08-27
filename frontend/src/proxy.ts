@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+// Note on #1415 (API-proxy request/response sanitization): this proxy only
+// attaches CSP/nonce headers to the app's own page responses — it does not
+// forward or rewrite requests to services/api or services/tts. All backend
+// calls (src/lib/api/*-client.ts) are made directly from the browser to
+// NEXT_PUBLIC_API_URL, which is public by design (the `NEXT_PUBLIC_` prefix
+// ships it to the client bundle). There is no server-side hop here that
+// could echo an internal upstream URL or leak a server-only env var back to
+// the client, so there is no proxied response to sanitize.
+
 // Allow the app to reach its configured backend API (e.g. a local http origin
 // during development) without loosening connect-src to all origins.
 function apiOrigin(): string {
