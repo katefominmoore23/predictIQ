@@ -1,0 +1,3 @@
+'use client';
+import { ReactNode,useEffect,useState } from 'react';
+export default function AdminLayout({children}:{children:ReactNode}){const [key,setKey]=useState(''),[ok,setOk]=useState(false);useEffect(()=>{const k=sessionStorage.getItem('predictiq-admin-key');if(k){setKey(k);fetch('/api/v1/admin/session',{headers:{'X-API-Key':k}}).then(r=>setOk(r.ok)).catch(()=>setOk(false))}},[]);if(!ok)return <form onSubmit={e=>{e.preventDefault();sessionStorage.setItem('predictiq-admin-key',key);setOk(true)}}><label>Admin API key<input value={key} onChange={e=>setKey(e.target.value)} required type="password"/></label><button>Continue</button></form>;return <>{children}</>}

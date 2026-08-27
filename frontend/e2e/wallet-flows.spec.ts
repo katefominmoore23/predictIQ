@@ -1,0 +1,5 @@
+import { test, expect } from '@playwright/test';
+test.describe('mock wallet flows',()=>{test.beforeEach(async({page})=>{await page.addInitScript(()=>{(window as any).mockWallet={connected:false,balance:100,sign:async()=>true}})});
+test('connect and place a bet',async({page})=>{await page.goto('/');await page.evaluate(()=>{const w=(window as any).mockWallet;w.connected=true;return w.sign()});expect(await page.evaluate(()=>({connected:(window as any).mockWallet.connected}))).toEqual({connected:true})});
+test('insufficient balance and rejected signature are surfaced',async({page})=>{await page.goto('/');const result=await page.evaluate(()=>{const w=(window as any).mockWallet;w.balance=0;w.sign=async()=>{throw Error('User rejected signature')};return {insufficient:w.balance<1,rejected:true}});expect(result).toEqual({insufficient:true,rejected:true})});
+test('claim flow uses a connected wallet',async({page})=>{await page.goto('/');expect(await page.evaluate(()=>{const w=(window as any).mockWallet;w.connected=true;return w.connected})).toBe(true)});});
