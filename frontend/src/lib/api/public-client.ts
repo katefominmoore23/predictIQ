@@ -309,6 +309,30 @@ async function request<T>(
   throw lastError || new ApiError("Request failed after retries", 0);
 }
 
+/**
+ * Soroban contract error code for "market not yet resolved" (see
+ * CONTRACT_ERROR_MESSAGES[147] in admin-client.ts / docs/CONTRACT_ERRORS.md).
+ *
+ * This is deliberately duplicated as a single constant here — rather than
+ * importing the full CONTRACT_ERROR_MESSAGES map from admin-client.ts — so
+ * that public pages can recognize this one, routine, pre-resolution state
+ * without pulling the entire admin-only error catalog into the public
+ * bundle (see the module doc comment above).
+ */
+export const MARKET_NOT_RESOLVED_CODE = 147;
+
+/**
+ * True when `error` is the "market not yet resolved" contract error. This is
+ * an expected, routine state for any market before resolution — not a
+ * failure — so callers (payout/claim UI) should render an informational
+ * "resolution pending" state instead of a destructive error toast (see #1369).
+ */
+export function isMarketNotResolvedError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (error.code !== 'CONTRACT_ERROR') return false;
+  return error.details?.['contract_code'] === MARKET_NOT_RESOLVED_CODE;
+}
+
 // ---------------------------------------------------------------------------
 // Public endpoints only — no admin methods below this line
 // ---------------------------------------------------------------------------
