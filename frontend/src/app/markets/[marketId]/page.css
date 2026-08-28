@@ -1,0 +1,224 @@
+.market-detail-page {
+  max-width: var(--container);
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  min-height: 100vh;
+}
+
+.market-header {
+  margin-bottom: 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.market-title-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.market-title-section h1 {
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-family: var(--font-display);
+  color: var(--fg);
+}
+
+.back-link {
+  color: var(--primary);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  transition: color var(--dur-fast) var(--ease-expo);
+  white-space: nowrap;
+}
+
+.back-link:hover {
+  color: var(--gold-soft);
+  text-decoration: underline;
+}
+
+.back-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.loading-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 1rem;
+  text-align: center;
+}
+
+.error-state {
+  background-color: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: var(--radius);
+  padding: 2rem;
+}
+
+.error-state h2 {
+  color: var(--destructive);
+  font-size: var(--text-xl);
+  margin-bottom: 0.5rem;
+}
+
+.error-state p {
+  color: var(--fg-muted);
+  margin-bottom: 1rem;
+}
+
+.market-not-found {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 1rem;
+  text-align: center;
+}
+
+.not-found-content {
+  background-color: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+  max-width: 500px;
+}
+
+.not-found-content h1 {
+  font-size: var(--text-xl);
+  margin-bottom: 0.5rem;
+  color: var(--fg);
+}
+
+.not-found-content p {
+  color: var(--fg-muted);
+  margin-bottom: 1.5rem;
+}
+
+.retry-button {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background-color: var(--primary);
+  color: var(--on-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-expo);
+}
+
+.retry-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(245, 158, 11, 0.3);
+}
+
+.retry-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.tab-content {
+  animation: fadeIn var(--dur) var(--ease-expo);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.market-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.detail-card {
+  background-color: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  transition: all var(--dur-fast) var(--ease-expo);
+}
+
+.detail-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.detail-card h3 {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg-muted);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-value {
+  font-size: var(--text-lg);
+  color: var(--fg);
+  margin: 0;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.coming-soon {
+  padding: 2rem;
+  text-align: center;
+  background-color: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+}
+
+.capitalize {
+  text-transform: capitalize;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-content,
+  .detail-card {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .market-detail-page {
+    padding: 1rem;
+  }
+
+  .market-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .market-title-section {
+    width: 100%;
+  }
+
+  .market-title-section h1 {
+    font-size: var(--text-xl);
+  }
+
+  .market-details-grid {
+    grid-template-columns: 1fr;
+  }
+}
