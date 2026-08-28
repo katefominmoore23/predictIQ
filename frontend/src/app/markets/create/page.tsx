@@ -4,6 +4,8 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { getEnvConfig } from '../../../lib/env';
 import { getConnectedWalletAddress } from '../../../lib/wallet';
+import { getSupportedAsset } from '../../../lib/assets';
+import { TokenSelector } from '../../../components/markets/TokenSelector';
 import {
   marketFormSchema,
   validateMarketForm,
@@ -17,6 +19,7 @@ const EMPTY_FORM: MarketFormValues = {
   description: '',
   outcomes: ['', ''],
   closeTime: '',
+  asset: '',
 };
 
 interface CreateMarketResponse {
@@ -84,6 +87,7 @@ export default function CreateMarketPage() {
           description: parsed.description,
           outcomes: parsed.outcomes,
           ends_at: new Date(parsed.closeTime).toISOString(),
+          settlement_asset: getSupportedAsset(parsed.asset)?.address,
         }),
       });
 
@@ -207,6 +211,22 @@ export default function CreateMarketPage() {
           {errors.closeTime && (
             <span id="market-close-time-error" className="market-create__error" role="alert">
               {errors.closeTime}
+            </span>
+          )}
+        </div>
+
+        <div className="market-create__field">
+          <label htmlFor="market-asset">Settlement asset</label>
+          <TokenSelector
+            id="market-asset"
+            value={values.asset}
+            onChange={(assetId) => setField('asset', assetId)}
+            aria-invalid={Boolean(errors.asset)}
+            aria-describedby={errors.asset ? 'market-asset-error' : undefined}
+          />
+          {errors.asset && (
+            <span id="market-asset-error" className="market-create__error" role="alert">
+              {errors.asset}
             </span>
           )}
         </div>

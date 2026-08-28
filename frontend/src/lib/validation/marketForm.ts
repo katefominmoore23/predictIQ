@@ -8,6 +8,7 @@
  */
 
 import { z } from 'zod';
+import { isSupportedAsset } from '../assets';
 
 // Mirrors the contract's supported outcome-count range
 // (contracts/predict-iq/src/types.rs: MAX_OUTCOMES_PER_MARKET) plus a
@@ -62,6 +63,13 @@ export const marketFormSchema = z.object({
       (value) => Date.parse(value) > Date.now(),
       'Close time must be in the future.'
     ),
+  // An asset that's technically valid on-chain but not on the platform's
+  // supported list (see lib/assets.ts) must be rejected here, not left for
+  // the contract call to fail (#1373).
+  asset: z
+    .string()
+    .min(1, 'Select a settlement asset.')
+    .refine(isSupportedAsset, 'Select a supported settlement asset.'),
 });
 
 export type MarketFormValues = z.infer<typeof marketFormSchema>;
