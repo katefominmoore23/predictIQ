@@ -3,6 +3,8 @@
 import React from 'react';
 import { api, ApiError } from '../../lib/api/public-client';
 import { useWallet, WALLET_NOT_INSTALLED } from '../../lib/wallet/WalletProvider';
+import { fetchNativeBalance } from '../../lib/wallet/balance';
+import { INSUFFICIENT_BALANCE_MESSAGE, isInsufficientBalanceError } from '../../lib/wallet/errors';
 import './PlaceBetForm.css';
 
 export interface MarketOutcome {
@@ -35,6 +37,10 @@ export const PlaceBetForm: React.FC<PlaceBetFormProps> = ({ market, onSubmitted 
   const [formError, setFormError] = React.useState<string | null>(null);
   const [txHash, setTxHash] = React.useState<string | null>(null);
   const [txStatus, setTxStatus] = React.useState<string | null>(null);
+  const [insufficientBalance, setInsufficientBalance] = React.useState<{
+    required: string;
+    current: string | null;
+  } | null>(null);
 
   // Poll the submitted transaction until it leaves the "pending" state.
   React.useEffect(() => {
@@ -93,6 +99,7 @@ export const PlaceBetForm: React.FC<PlaceBetFormProps> = ({ market, onSubmitted 
     setSubmitting(true);
     setTxHash(null);
     setTxStatus(null);
+    setInsufficientBalance(null);
 
     try {
       const result = await api.placeBet(market.id, {
@@ -104,9 +111,17 @@ export const PlaceBetForm: React.FC<PlaceBetFormProps> = ({ market, onSubmitted 
       setTxStatus(result.status);
       onSubmitted?.({ txHash: result.tx_hash, outcome: selectedOutcome as number, amount });
     } catch (err) {
-      const message =
-        err instanceof ApiError ? err.message : 'Failed to submit your bet. Please try again.';
-      setFormError(message);
+      if (err instanceof ApiError && isInsufficientBalanceError(err.details)) {
+        // Read the balance fresh at the moment of failure — never the value
+        // cached from page load — since the wallet's actual asset state is
+        // what the user needs to see to understand the error (see #79).
+        const currentBalance = await fetchNativeBalance(wallet.address, wallet.network);
+        setInsufficientBalance({ required: amount, current: currentBalance });
+      } else {
+        const message =
+          err instanceof ApiError ? err.message : 'Failed to submit your bet. Please try again.';
+        setFormError(message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -174,6 +189,14 @@ export const PlaceBetForm: React.FC<PlaceBetFormProps> = ({ market, onSubmitted 
       {formError && (
         <p className="place-bet-form__error" role="alert">
           {formError}
+        </p>
+      )}
+
+      {insufficientBalance && (
+        <p className="place-bet-form__error" role="alert">
+          {INSUFFICIENT_BALANCE_MESSAGE} Your balance is{' '}
+          {insufficientBalance.current ?? 'unavailable'} XLM, but this bet requires{' '}
+          {insufficientBalance.required} XLM.
         </p>
       )}
 
