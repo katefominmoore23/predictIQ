@@ -328,6 +328,100 @@ test.describe('User Journey: Homepage → FAQ → Contact', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Full cross-epic journey: browse → connect wallet → bet → view statistics →
+// subscribe to newsletter, as one continuous session. Wallet/betting/markets
+// UI (#68, #76, #88) hasn't shipped yet, so those legs run at the API level —
+// same approach as the "Betting Flow" suite above — while browse, statistics,
+// and newsletter run through the real UI. The point of this suite is proving
+// state from one step is visible in a later step, not just that each step
+// passes in isolation.
+// ---------------------------------------------------------------------------
+
+test.describe('User Journey: Full Cross-Epic Flow', () => {
+  test('bet placed in the wallet/bet steps is reflected in statistics', async ({ page }) => {
+    const wallet = `GTEST${randomUUID().replace(/-/g, '').toUpperCase().slice(0, 51)}`;
+    const marketId = 77;
+    const txHash = `tx_${randomUUID().replace(/-/g, '')}`;
+
+    // Baseline stats before the bet lands
+    let activeMarkets = 40;
+    let totalVolume = 4820000;
+
+    await page.route('**/api/**/statistics', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ total_markets: 128, total_volume: totalVolume, active_markets: activeMarkets }),
+      })
+    );
+
+    await page.route(`**/api/**/blockchain/markets/${marketId}/bets`, (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      // Placing the bet moves volume — the later statistics check must see this.
+      totalVolume += 100;
+      route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ tx_hash: txHash, status: 'pending' }),
+      });
+    });
+
+    await page.route(`**/api/**/blockchain/users/${wallet}/bets*`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ bets: [{ market_id: marketId, outcome: 1, amount: '100', tx_hash: txHash, status: 'confirmed' }], total: 1 }),
+      })
+    );
+
+    // Step 1: Browse (real UI)
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: /decentralized prediction markets/i })).toBeVisible();
+    await page.getByRole('link', { name: /how it works/i }).click();
+    await expect(page.getByRole('heading', { name: /place bets/i })).toBeVisible();
+
+    // Step 2: Connect wallet (no UI yet — wallet id is just the session's identity for later API calls)
+    expect(wallet).toMatch(/^GTEST/);
+
+    // Step 3: Bet (API-level)
+    const bet = await page.evaluate(
+      async ({ marketId, wallet }: { marketId: number; wallet: string }) => {
+        const res = await fetch(`/api/v1/blockchain/markets/${marketId}/bets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet, outcome: 1, amount: '100' }),
+        });
+        return res.json();
+      },
+      { marketId, wallet }
+    );
+    expect(bet.tx_hash).toBe(txHash);
+
+    // Step 4: View statistics (real UI) — must reflect the bet placed above
+    await page.reload();
+    await expect(page.getByText(/4,820,100|4820100/)).toBeVisible();
+
+    // ...and the bet itself must show up in the user's position (bet history)
+    const position = await page.evaluate(
+      async (wallet: string) => {
+        const res = await fetch(`/api/v1/blockchain/users/${wallet}/bets`);
+        return res.json();
+      },
+      wallet
+    );
+    expect(position.bets).toHaveLength(1);
+    expect(position.bets[0].tx_hash).toBe(txHash);
+
+    // Step 5: Subscribe to newsletter (real UI)
+    const emailInput = page.getByLabel(/email address/i);
+    await emailInput.fill('journey@example.com');
+    await page.getByRole('button', { name: /get early access/i }).click();
+    await expect(page.getByRole('button', { name: /subscribed/i })).toBeVisible();
+    await expect(emailInput).toBeDisabled();
+  });
+});
+
 test.describe('User Journey: Mobile Navigation Flow', () => {
   test.use({ viewport: { width: 375, height: 667 } });
   

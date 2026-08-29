@@ -1,0 +1,38 @@
+/* MarketDetailView — market page shell + payout action */
+.market-detail {
+  max-width: var(--container);
+  margin: 0 auto;
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.market-detail__title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  margin: 0 0 1.5rem;
+}
+
+.market-detail__payout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.market-detail__payout-notice {
+  width: 100%;
+}
+
+.market-detail__payout-error {
+  color: var(--destructive);
+  font-size: var(--text-sm);
+}
+
+.market-detail__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  text-align: center;
+  color: var(--destructive);
+  padding: 2rem 0;
+}

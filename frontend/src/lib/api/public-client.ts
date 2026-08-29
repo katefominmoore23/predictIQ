@@ -14,6 +14,7 @@
 
 import { getEnvConfig } from '../env';
 import { apiCache, CACHE_TTL } from './cache';
+import { csrfHeaders, isCsrfTokenError } from './csrf';
 import type { paths, components } from './schema';
 
 const config = getEnvConfig();
@@ -39,6 +40,13 @@ const PATHS = {
   oracleResult: "/api/v1/blockchain/oracle/{market_id}",
   transactionStatus: "/api/v1/blockchain/tx/{tx_hash}",
 } satisfies Record<string, keyof paths>;
+
+/**
+ * `placeBet` is not yet part of services/api/openapi.yaml (see #78), so its
+ * path is kept out of the `satisfies keyof paths` check above rather than
+ * loosening that check for every other entry.
+ */
+const PLACE_BET_PATH = "/api/v1/blockchain/markets/{market_id}/bets";
 
 /** Fills a `{placeholder}` segment of a schema path template with an encoded value. */
 export function fillPath(template: string, placeholder: string, value: string | number): string {
@@ -69,6 +77,7 @@ export const CacheTag = {
   BLOCKCHAIN: 'blockchain',
   NEWSLETTER: 'newsletter',
   EMAIL: 'email',
+  AUDIT: 'audit',
 } as const;
 
 function getRetryDelay(attempt: number, retryAfter?: number): number {
@@ -211,7 +220,7 @@ async function request<T>(
     try {
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders(method) },
         body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
         signal,
       });
@@ -242,8 +251,12 @@ async function request<T>(
           err = {};
         }
         const errObj = (typeof err === 'object' && err !== null) ? err as Record<string, unknown> : {};
-        const message = (errObj['message'] as string | undefined) ?? res.statusText ?? `HTTP ${res.status}`;
         const code = (errObj['code'] as string | undefined) ?? "UNKNOWN_ERROR";
+        // A stale/expired CSRF token gets a distinct, actionable message
+        // instead of surfacing as a confusing generic 403 (#1417).
+        const message = isCsrfTokenError(res.status, code)
+          ? "Your session has expired. Please refresh the page and try again."
+          : (errObj['message'] as string | undefined) ?? res.statusText ?? `HTTP ${res.status}`;
         const details = errObj['details'] as Record<string, unknown> | undefined;
         throw new ApiError(message, res.status, code, details);
       }
@@ -307,6 +320,30 @@ async function request<T>(
   }
 
   throw lastError || new ApiError("Request failed after retries", 0);
+}
+
+/**
+ * Soroban contract error code for "market not yet resolved" (see
+ * CONTRACT_ERROR_MESSAGES[147] in admin-client.ts / docs/CONTRACT_ERRORS.md).
+ *
+ * This is deliberately duplicated as a single constant here — rather than
+ * importing the full CONTRACT_ERROR_MESSAGES map from admin-client.ts — so
+ * that public pages can recognize this one, routine, pre-resolution state
+ * without pulling the entire admin-only error catalog into the public
+ * bundle (see the module doc comment above).
+ */
+export const MARKET_NOT_RESOLVED_CODE = 147;
+
+/**
+ * True when `error` is the "market not yet resolved" contract error. This is
+ * an expected, routine state for any market before resolution — not a
+ * failure — so callers (payout/claim UI) should render an informational
+ * "resolution pending" state instead of a destructive error toast (see #1369).
+ */
+export function isMarketNotResolvedError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (error.code !== 'CONTRACT_ERROR') return false;
+  return error.details?.['contract_code'] === MARKET_NOT_RESOLVED_CODE;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +414,18 @@ export const api = {
       signal,
     }),
 
+  /** Submits a bet for the connected wallet. Returns the pending on-chain tx. */
+  placeBet: (
+    marketId: number | string,
+    body: { wallet: string; outcome: number; amount: string },
+    signal?: AbortSignal
+  ) =>
+    request<{ tx_hash: string; status: string }>(
+      "POST",
+      fillPath(PLACE_BET_PATH, 'market_id', marketId),
+      { body, cacheTags: [CacheTag.BLOCKCHAIN, CacheTag.MARKETS], signal },
+    ),
+
   // Newsletter (public subscription / self-service)
   newsletterSubscribe: (body: { email: string; source?: string }, signal?: AbortSignal) =>
     request<{ success: boolean; message: string }>("POST", "/api/v1/newsletter/subscribe", {
@@ -399,11 +448,25 @@ export const api = {
       signal,
     }),
 
-  newsletterGdprExport: (email: string, signal?: AbortSignal) =>
-    request<{ success: boolean; data: Record<string, unknown> }>(
+  newsletterGdprRequestToken: (body: { email: string }, signal?: AbortSignal) =>
+    request<{ success: boolean; message: string }>(
+      "POST",
+      "/api/v1/newsletter/gdpr/request-token",
+      { body, cacheTags: [CacheTag.NEWSLETTER], signal }
+    ),
+
+  newsletterGdprExport: (
+    body: { email: string; token: string } | string,
+    signal?: AbortSignal
+  ) =>
+    request<{ success: boolean; data: Record<string, unknown>; message?: string }>(
       "POST",
       "/api/v1/newsletter/gdpr/export",
-      { body: { email }, cacheTags: [CacheTag.NEWSLETTER], signal }
+      {
+        body: typeof body === 'string' ? { email: body } : body,
+        cacheTags: [CacheTag.NEWSLETTER],
+        signal,
+      }
     ),
 
   newsletterGdprDelete: (email: string, signal?: AbortSignal) =>

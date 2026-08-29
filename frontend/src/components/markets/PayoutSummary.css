@@ -1,0 +1,98 @@
+/* PayoutSummary — read-only resolved-market payout breakdown */
+.payout-summary {
+  max-width: var(--container);
+  padding: clamp(1.5rem, 3vw, 2rem);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.payout-summary > h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  margin: 0 0 1rem;
+}
+
+.payout-summary__mode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.payout-summary__mode-badge {
+  align-self: flex-start;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--purple-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.payout-summary__mode-desc {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+
+.payout-summary__outcomes {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.payout-summary__outcome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.payout-summary__outcome--winner {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  background: color-mix(in srgb, var(--success) 8%, var(--surface-2));
+}
+
+.payout-summary__outcome-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--fg);
+}
+
+.payout-summary__winner-tag {
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--success) 20%, transparent);
+  color: var(--success);
+}
+
+.payout-summary__outcome-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.payout-summary__immutability-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { waitForFonts } from './helpers';
 
 // Read visual diff threshold from environment (default: 0.1%)
 const VISUAL_DIFF_THRESHOLD = parseFloat(process.env.VISUAL_DIFF_THRESHOLD || '0.1');
@@ -11,6 +12,7 @@ test.describe('Visual Regression - Homepage', () => {
   test('should match homepage screenshot', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
+    await waitForFonts(page);
 
     await expect(page).toHaveScreenshot('homepage.png', {
       fullPage: true,
@@ -100,6 +102,7 @@ test.describe('Visual Regression - Mobile', () => {
   test('should match mobile homepage', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
+    await waitForFonts(page);
     
     await expect(page).toHaveScreenshot('mobile-homepage.png', {
       fullPage: true,
@@ -133,6 +136,7 @@ test.describe('Visual Regression - Tablet', () => {
   test('should match tablet homepage', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
+    await waitForFonts(page);
     
     await expect(page).toHaveScreenshot('tablet-homepage.png', {
       fullPage: true,
@@ -171,6 +175,7 @@ test.describe('Visual Regression - Dark Mode', () => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.goto('/');
     await page.waitForLoadState('networkidle');
+    await waitForFonts(page);
     
     await expect(page).toHaveScreenshot('homepage-dark.png', {
       fullPage: true,
@@ -217,7 +222,8 @@ test.describe('Visual Regression - Breakpoints', () => {
       await page.setViewportSize({ width: breakpoint.width, height: breakpoint.height });
       await page.goto('/');
       await page.waitForLoadState('networkidle');
-      
+      await waitForFonts(page);
+
       await expect(page).toHaveScreenshot(`${breakpoint.name}.png`, {
         fullPage: true,
         animations: 'disabled',
@@ -225,4 +231,43 @@ test.describe('Visual Regression - Breakpoints', () => {
       });
     });
   }
+});
+
+// The markets list/detail pages (#56, #57) haven't shipped yet, so there is no
+// route to snapshot. Statistics is the one real data-fetching page live today;
+// it gets covered here so the harness already has a baseline for it and this
+// describe block is the natural place to add markets list/detail once those
+// routes exist.
+test.describe('Visual Regression - Statistics Page', () => {
+  test('should match statistics section with loaded data', async ({ page }) => {
+    await page.route('**/api/**/statistics', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ total_markets: 128, total_volume: 4820000, active_markets: 37 }),
+      })
+    );
+
+    await page.goto('/');
+    const statisticsSection = page.locator('.statistics');
+    await expect(page.getByText(/128/)).toBeVisible();
+    await waitForFonts(page);
+
+    await expect(statisticsSection).toHaveScreenshot('statistics-section.png', {
+      maxDiffPixelRatio: MAX_DIFF_PIXEL_RATIO,
+    });
+  });
+
+  test('should match statistics section loading state', async ({ page }) => {
+    // Never resolve, so the section stays in its loading/skeleton state.
+    await page.route('**/api/**/statistics', () => {});
+
+    await page.goto('/');
+    const statisticsSection = page.locator('.statistics');
+    await waitForFonts(page);
+
+    await expect(statisticsSection).toHaveScreenshot('statistics-section-loading.png', {
+      maxDiffPixelRatio: MAX_DIFF_PIXEL_RATIO,
+    });
+  });
 });

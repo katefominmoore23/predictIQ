@@ -1,0 +1,42 @@
+.deposit-tier-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.deposit-tier-badge__tier {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.deposit-tier-badge__note {
+  color: var(--fg-muted);
+}
+
+.deposit-tier-badge--ok {
+  border-color: var(--success);
+}
+
+.deposit-tier-badge--blocked {
+  border-color: var(--destructive);
+}
+
+.deposit-tier-badge__blocked-reason {
+  margin: 0.25rem 0 0;
+  color: var(--destructive);
+}
+
+.deposit-tier-badge--loading {
+  color: var(--fg-subtle);
+}
+
+.deposit-tier-badge--error {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}

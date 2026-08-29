@@ -9,6 +9,7 @@ interface Props {
   fallback?: ReactElement | FallbackRenderer;
   onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
   section?: string;
+  reportIssueUrl?: string;
 }
 
 interface State {
@@ -44,6 +45,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
         return this.props.fallback(this.reset);
       }
 
+      const reportUrl =
+        this.props.reportIssueUrl ||
+        'https://github.com/solutions-plug/predictIQ/issues/new';
+
       return (
         this.props.fallback || (
           <div 
@@ -57,15 +62,33 @@ export class ErrorBoundary extends React.Component<Props, State> {
                 ? `An error occurred in the ${this.props.section} section.` 
                 : 'An unexpected error occurred.'}
             </p>
-            <p className="error-details">
-              {this.state.error?.message}
-            </p>
-            <button 
-              onClick={() => window.location.reload()}
-              aria-label="Reload the page"
-            >
-              Reload Page
-            </button>
+            {this.state.error?.message && (
+              <p className="error-details">
+                {this.state.error.message}
+              </p>
+            )}
+            <div className="error-actions" style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1rem' }}>
+              <button 
+                type="button"
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    window.location.reload();
+                  }
+                }}
+                aria-label="Reload the page"
+              >
+                Reload Page
+              </button>
+              <a
+                href={reportUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Report this issue"
+                className="report-issue-link"
+              >
+                Report Issue
+              </a>
+            </div>
           </div>
         )
       );

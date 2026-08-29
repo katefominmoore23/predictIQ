@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { CSRF_COOKIE_NAME } from './lib/api/csrf';
+
+// Note on #1415 (API-proxy request/response sanitization): this proxy only
+// attaches CSP/nonce headers to the app's own page responses — it does not
+// forward or rewrite requests to services/api or services/tts. All backend
+// calls (src/lib/api/*-client.ts) are made directly from the browser to
+// NEXT_PUBLIC_API_URL, which is public by design (the `NEXT_PUBLIC_` prefix
+// ships it to the client bundle). There is no server-side hop here that
+// could echo an internal upstream URL or leak a server-only env var back to
+// the client, so there is no proxied response to sanitize.
 
 // Allow the app to reach its configured backend API (e.g. a local http origin
 // during development) without loosening connect-src to all origins.
@@ -41,6 +51,21 @@ export function proxy(request: NextRequest) {
     request: { headers: requestHeaders },
   });
   response.headers.set('Content-Security-Policy', cspHeader);
+
+  // Issue a double-submit CSRF cookie for cookie-authenticated mutations
+  // (#1417). Deliberately NOT httpOnly: client.ts reads this value and
+  // echoes it back as an X-CSRF-Token header, so the backend can confirm
+  // the request came from JS running on this origin, not a forged
+  // cross-site form/image submission. Only set once per session — a fresh
+  // value on every request would break in-flight requests.
+  if (!request.cookies.get(CSRF_COOKIE_NAME)) {
+    response.cookies.set(CSRF_COOKIE_NAME, crypto.randomUUID(), {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+    });
+  }
 
   return response;
 }

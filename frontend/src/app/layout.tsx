@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 import { headers } from 'next/headers';
 import { Orbitron, Exo_2 } from 'next/font/google';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { OfflineBanner } from '../components/OfflineBanner';
+import { WalletProvider } from '../lib/wallet/WalletProvider';
 import { darkModeInitScript } from '../lib/darkMode';
 import '../styles/tokens.css';
 import '../styles/accessibility.css';
@@ -42,7 +44,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: darkModeInitScript }} />
       </head>
       <body>
-        <ErrorBoundary section="main">{children}</ErrorBoundary>
+        <OfflineBanner />
+        <ErrorBoundary section="main">
+          <WalletProvider>{children}</WalletProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );
