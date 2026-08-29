@@ -1,0 +1,18 @@
+.outcome-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.outcome-list--scrollable {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.outcome-list__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+}

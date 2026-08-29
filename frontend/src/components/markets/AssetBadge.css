@@ -1,0 +1,65 @@
+/* AssetBadge — compact classic/Soroban asset identifier */
+.asset-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-glass);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+}
+
+.asset-badge--classic {
+  border-color: color-mix(in srgb, var(--gold) 45%, var(--border));
+}
+
+.asset-badge--soroban {
+  border-color: color-mix(in srgb, var(--purple) 45%, var(--border));
+}
+
+.asset-badge__kind {
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+}
+
+.asset-badge--classic .asset-badge__kind {
+  background: color-mix(in srgb, var(--gold) 20%, transparent);
+  color: var(--gold-soft);
+}
+
+.asset-badge--soroban .asset-badge__kind {
+  background: color-mix(in srgb, var(--purple) 20%, transparent);
+  color: var(--purple-soft);
+}
+
+.asset-badge__code {
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.asset-badge__address {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--fg-muted);
+  font-family: monospace;
+  cursor: pointer;
+}
+
+.asset-badge__address:hover,
+.asset-badge__address:focus-visible {
+  color: var(--fg);
+}
+
+.asset-badge__copy-hint {
+  font-size: 0.7rem;
+}

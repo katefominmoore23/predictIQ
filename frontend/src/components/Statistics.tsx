@@ -1,9 +1,15 @@
 import React from 'react';
 import { useAsync } from '../lib/hooks/useAsync';
+import { useOnlineStatus } from '../lib/hooks/useOnlineStatus';
 import { api } from '../lib/api/public-client';
 import { LoadingSpinner } from './LoadingSpinner';
 import { Skeleton } from './Skeleton';
 import './Statistics.css';
+
+// Auto-refresh cadence while online; entirely paused while offline (see
+// useOnlineStatus / OfflineBanner) so we don't spend the retry budget on
+// requests that are known to fail.
+const REFRESH_INTERVAL_MS = 30_000;
 
 // Field names match the backend's Statistics struct (services/api/src/db.rs),
 // which serializes as snake_case like every other typed response in this client.
@@ -20,7 +26,26 @@ export const Statistics: React.FC = () => {
     fetchStatistics,
     { immediate: true }
   );
-  const loading = status === 'loading';
+  const isOnline = useOnlineStatus();
+
+  // Pause auto-refresh while offline (requests would just fail/retry for no
+  // reason) and resume — with an immediate refetch — once connectivity is
+  // restored.
+  const wasOnlineRef = React.useRef(isOnline);
+  React.useEffect(() => {
+    if (isOnline && !wasOnlineRef.current) {
+      void execute();
+    }
+    wasOnlineRef.current = isOnline;
+
+    if (!isOnline) return undefined;
+
+    const id = setInterval(() => {
+      void execute();
+    }, REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(id);
+  }, [isOnline, execute]);
 
   const displayValues = React.useMemo(
     () => ({

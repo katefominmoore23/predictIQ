@@ -11,6 +11,13 @@ const envSchema = z.object({
     .string()
     .min(1, 'NEXT_PUBLIC_API_URL must not be empty')
     .url('NEXT_PUBLIC_API_URL must be a valid URL'),
+  // Optional: base URL for services/tts. Unset disables TTS features rather
+  // than failing the build, since not every deployment runs the TTS service.
+  NEXT_PUBLIC_TTS_API_URL: z
+    .string()
+    .url('NEXT_PUBLIC_TTS_API_URL must be a valid URL')
+    .optional()
+    .or(z.literal('')),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;
@@ -22,6 +29,7 @@ export type EnvConfig = z.infer<typeof envSchema>;
 export function validateEnvironment(): EnvConfig {
   const result = envSchema.safeParse({
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+    NEXT_PUBLIC_TTS_API_URL: process.env.NEXT_PUBLIC_TTS_API_URL,
   });
 
   if (!result.success) {

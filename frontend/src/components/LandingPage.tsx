@@ -2,10 +2,9 @@ import React from 'react';
 import { useI18n } from '../lib/hooks/useI18n';
 import { useDarkMode } from '../lib/hooks/useDarkMode';
 import { type Locale } from '../lib/i18n';
-import { api } from '../lib/api/public-client';
 import { Statistics } from './Statistics';
 import { ErrorBoundary } from './ErrorBoundary';
-import { LoadingSpinner } from './LoadingSpinner';
+import { NewsletterSignup } from './NewsletterSignup';
 import { FeatureCard } from './landing/FeatureCard';
 import { Step } from './landing/Step';
 import { FooterColumn } from './landing/FooterColumn';
@@ -17,46 +16,6 @@ interface LandingPageProps {
 export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
   const { t, locale, setLocale, availableLocales } = useI18n();
   const { isDarkMode, toggleDarkMode } = useDarkMode();
-  const [email, setEmail] = React.useState('');
-  const [emailError, setEmailError] = React.useState('');
-  const [isSubmitted, setIsSubmitted] = React.useState(false);
-  const [apiError, setApiError] = React.useState('');
-  const [isLoading, setIsLoading] = React.useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (isLoading || isSubmitted) {
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email) {
-      setEmailError(t('hero.emailRequired'));
-      return;
-    }
-    if (!emailRegex.test(email)) {
-      setEmailError(t('hero.emailInvalid'));
-      return;
-    }
-
-    setEmailError('');
-    setApiError('');
-    setIsLoading(true);
-
-    try {
-      const result = await api.newsletterSubscribe({ email });
-      if (result.success) {
-        setIsSubmitted(true);
-      } else {
-        setApiError(result.message || 'Subscription failed');
-      }
-    } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Network error occurred');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const features = [
     { icon: '/icons/decentralized.svg', title: t('features.decentralized.title'), description: t('features.decentralized.description') },
@@ -160,80 +119,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
           </p>
           
           {/* CTA Form */}
-          <form
-            onSubmit={handleSubmit}
-            aria-labelledby="signup-heading"
-            aria-busy={isLoading}
-            noValidate
-          >
-            <h2 id="signup-heading" className="visually-hidden">
-              {t('hero.signupHeading')}
-            </h2>
-            
-            <div className="form-group">
-              <label htmlFor="email-input">
-                {t('hero.emailLabel')}
-                <span aria-label="required" className="required">*</span>
-              </label>
-              <input
-                id="email-input"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  setEmailError('');
-                  setApiError('');
-                }}
-                aria-required="true"
-                aria-invalid={!!emailError}
-                aria-describedby={emailError ? 'email-error' : apiError ? 'api-error' : undefined}
-                placeholder={t('hero.emailPlaceholder')}
-                disabled={isSubmitted || isLoading}
-              />
-              {emailError && (
-                <span id="email-error" role="alert" className="error-message">
-                  {emailError}
-                </span>
-              )}
-              {apiError && (
-                <span id="api-error" role="alert" className="error-message">
-                  {apiError}
-                </span>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              aria-disabled={isSubmitted || isLoading}
-              aria-label={
-                isLoading 
-                  ? 'Submitting...' 
-                  : isSubmitted 
-                    ? t('hero.subscribedButton') 
-                    : t('hero.submitButton')
-              }
-            >
-              {isLoading ? (
-                <LoadingSpinner size="small" aria-label="Submitting" />
-              ) : isSubmitted ? (
-                t('hero.subscribedButton')
-              ) : (
-                t('hero.submitButton')
-              )}
-            </button>
-
-            {/* Screen reader announcement */}
-            <div 
-              id="form-status" 
-              role="status" 
-              aria-live="polite" 
-              aria-atomic="true"
-              className="visually-hidden"
-            >
-              {isSubmitted && t('hero.successMessage')}
-            </div>
-          </form>
+          <NewsletterSignup />
         </section>
 
         {/* Statistics Section */}

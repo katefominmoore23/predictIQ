@@ -1,0 +1,27 @@
+/* ResolutionPendingNotice — informational, never styled as an error */
+.resolution-pending {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--gold) 10%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--border));
+}
+
+.resolution-pending__icon {
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+.resolution-pending__title {
+  margin: 0 0 0.25rem;
+  font-weight: 700;
+  color: var(--gold-soft);
+}
+
+.resolution-pending__desc {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
