@@ -172,6 +172,32 @@ test.describe('Scroll Behavior', () => {
   });
 });
 
+test.describe('Status Announcements', () => {
+  // This app has no Modal/Toast/Table components (no Design System package exists
+  // in this repo yet) — the closest analog is the aria-live status region that
+  // announces newsletter submission results to screen readers, tested in isolation here.
+  test('should announce success to the live status region on valid submit', async ({ page }) => {
+    await page.goto('/');
+
+    const status = page.locator('#form-status');
+    await expect(status).toBeEmpty();
+
+    await page.getByLabel(/email address/i).fill('valid@example.com');
+    await page.getByRole('button', { name: /get early access/i }).click();
+
+    await expect(status).toHaveText(/successfully subscribed/i);
+  });
+
+  test('should not populate the live status region on a failed submit', async ({ page }) => {
+    await page.goto('/');
+
+    await page.getByRole('button', { name: /get early access/i }).click();
+
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.locator('#form-status')).toBeEmpty();
+  });
+});
+
 test.describe('External Link Clicks', () => {
   test('should have external links with proper attributes', async ({ page }) => {
     await page.goto('/');
