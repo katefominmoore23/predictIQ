@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { Orbitron, Exo_2 } from 'next/font/google';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { OfflineBanner } from '../components/OfflineBanner';
+import { AppShell } from '../components/AppShell';
 import { WalletProvider } from '../lib/wallet/WalletProvider';
 import { darkModeInitScript } from '../lib/darkMode';
 import '../styles/tokens.css';
@@ -46,7 +47,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body>
         <OfflineBanner />
         <ErrorBoundary section="main">
-          <WalletProvider>{children}</WalletProvider>
+          <WalletProvider>
+            <AppShell>{children}</AppShell>
+          </WalletProvider>
         </ErrorBoundary>
       </body>
     </html>

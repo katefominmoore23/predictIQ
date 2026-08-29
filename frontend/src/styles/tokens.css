@@ -59,8 +59,17 @@
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.7);
+  --shadow-lg: 0 30px 60px -20px rgba(0, 0, 0, 0.8);
   --shadow-glow-gold: 0 0 0 1px rgba(245, 158, 11, 0.15), 0 20px 60px -20px rgba(245, 158, 11, 0.35);
   --shadow-glow-purple: 0 24px 70px -24px rgba(139, 92, 246, 0.45);
+
+  /* Issue #1313: these were referenced elsewhere in the app only via
+     `var(--x, <hardcoded fallback>)`, bypassing the centralized token
+     system entirely (so dark-mode/#22-23 and contrast-check/#21 tooling
+     had nothing to hook into for them). Aliased to their equivalent
+     existing tokens rather than introducing new independent colors. */
+  --danger: var(--destructive);
+  --border-color: var(--border);
 
   color-scheme: dark;
 }
@@ -89,6 +98,22 @@ html.light-mode {
   --shadow-glow-purple: 0 24px 60px -28px rgba(139, 92, 246, 0.35);
 
   color-scheme: light;
+}
+
+/* Issue #1316: hover affordance for ui/Card.tsx's `interactive` variant —
+   can't be expressed via the component's inline styles alone. */
+.ui-card--interactive:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
+}
+
+/* Issue #1315: shared keyframe for ui/Button.tsx's isLoading spinner.
+   Was previously only defined in admin.css/LoadingSpinner.css, neither of
+   which layout.tsx loads globally — Button is meant for use outside the
+   admin section too (bet placement, market creation, resolution). */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @media (prefers-color-scheme: light) {
