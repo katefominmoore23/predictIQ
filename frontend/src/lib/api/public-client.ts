@@ -14,6 +14,7 @@
 
 import { getEnvConfig } from '../env';
 import { apiCache, CACHE_TTL } from './cache';
+import { reportResponseHeaders } from './deprecation';
 import { csrfHeaders, isCsrfTokenError } from './csrf';
 import type { paths, components } from './schema';
 
@@ -226,6 +227,7 @@ async function request<T>(
       });
 
       clear();
+      reportResponseHeaders(res.headers);
 
       if (!res.ok) {
         if (res.status === 429) {

@@ -18,6 +18,7 @@ export {
 
 import { api as publicApi, CacheTag, fillPath } from './public-client';
 import { apiCache, CACHE_TTL } from './cache';
+import { reportResponseHeaders } from './deprecation';
 import { getEnvConfig } from '../env';
 import type { paths, components } from './schema';
 
@@ -134,6 +135,7 @@ async function request<T>(
       });
 
       clear();
+      reportResponseHeaders(res.headers);
 
       if (!res.ok) {
         if (res.status === 429 && attempt < maxRetries) {
