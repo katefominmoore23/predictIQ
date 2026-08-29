@@ -51,20 +51,20 @@ const translations: LocaleData = {
     howItWorks: {
       heading: 'How It Works',
       step1: {
-        title: 'Create a Market',
-        description: 'Define outcomes and set parameters for your prediction market.',
+        title: 'Connect your wallet',
+        description: 'Link a Stellar wallet to sign transactions. No account, no email.',
       },
       step2: {
-        title: 'Place Bets',
-        description: 'Users bet on outcomes they believe will occur.',
+        title: 'Browse markets',
+        description: 'Explore open prediction markets and their live odds and volume.',
       },
       step3: {
-        title: 'Oracle Resolution',
-        description: 'Trusted oracles provide real-world data to resolve markets.',
+        title: 'Place a bet',
+        description: 'Pick an outcome and stake on it. Your position settles on-chain.',
       },
       step4: {
-        title: 'Claim Winnings',
-        description: 'Winners automatically receive their share of the pool.',
+        title: 'Claim your payout',
+        description: 'Once a market resolves, winners claim their share of the pool.',
       },
     },
     about: {
@@ -75,14 +75,15 @@ const translations: LocaleData = {
     footer: {
       title: 'PredictIQ',
       tagline: 'Decentralized prediction markets for everyone.',
-      linksHeading: 'Links',
-      legalHeading: 'Legal',
+      productHeading: 'Product',
+      markets: 'Markets',
+      statistics: 'Statistics',
+      createMarket: 'Create a market',
+      resourcesHeading: 'Resources',
       documentation: 'Documentation',
       github: 'GitHub',
-      discord: 'Discord',
-      privacy: 'Privacy Policy',
-      terms: 'Terms of Service',
-      copyright: '© 2024 PredictIQ. All rights reserved.',
+      newsletterHeading: 'Stay in the loop',
+      copyright: '© 2026 PredictIQ. All rights reserved.',
     },
   },
 };

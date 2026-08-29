@@ -581,3 +581,65 @@ footer[role='contentinfo'] {
 .hero form {
   animation-delay: 180ms;
 }
+
+/* =============================================================
+   RESPONSIVE HARDENING (#1348)
+
+   Goal: no horizontal scroll or clipped/overlapping content at
+   320 / 768 / 1440, including with the longest translated string.
+   ============================================================= */
+
+/* Long unbroken words in a translated locale must wrap, not push the
+   container wide. */
+.hero-description,
+.feature-card h3,
+.feature-card p,
+#how-it-works .steps-list h3,
+#how-it-works .steps-list p,
+.footer-section h2,
+.footer-section h3,
+.footer-section p,
+.footer-section a {
+  overflow-wrap: anywhere;
+}
+
+/* A `1fr` track can still overflow its grid when its content has a large
+   min-content size; `minmax(0, 1fr)` lets it shrink. */
+.features-grid,
+#how-it-works .steps-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+}
+.footer-content {
+  max-width: 100%;
+}
+
+/* The step title is a link - give it the same colour as the heading and a
+   visible focus ring. */
+.step__link {
+  color: inherit;
+  text-decoration: none;
+}
+.step__link:hover {
+  text-decoration: underline;
+}
+.step__link:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* Smallest supported width. */
+@media (max-width: 360px) {
+  .features-grid,
+  #how-it-works .steps-list {
+    grid-template-columns: 1fr;
+  }
+  .feature-card,
+  .feature-card__link,
+  #how-it-works .steps-list li {
+    padding-inline: 1.1rem;
+  }
+  #hero-heading {
+    font-size: clamp(1.75rem, 9vw, 2.5rem);
+  }
+}
