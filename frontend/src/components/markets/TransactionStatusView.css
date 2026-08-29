@@ -1,0 +1,96 @@
+/* TransactionStatusView — token-driven tx status card */
+.tx-status {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.tx-status > h1 {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  margin: 0 0 0.5rem;
+}
+
+.tx-status__hash {
+  font-family: monospace;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+  word-break: break-all;
+  margin: 0 0 1.5rem;
+}
+
+.tx-status__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  letter-spacing: 0.02em;
+  margin-bottom: 1rem;
+}
+
+.tx-status__badge--success {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
+}
+
+.tx-status__badge--failed {
+  background: color-mix(in srgb, var(--destructive) 18%, transparent);
+  color: var(--destructive);
+  border: 1px solid color-mix(in srgb, var(--destructive) 40%, transparent);
+}
+
+.tx-status__badge--not_found {
+  background: color-mix(in srgb, var(--gold) 16%, transparent);
+  color: var(--gold-soft);
+  border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+}
+
+.tx-status__ledger,
+.tx-status__polling-note {
+  margin: 0.25rem 0;
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+
+.tx-status__error-detail {
+  margin: 0.5rem 0;
+  color: var(--destructive);
+  font-size: var(--text-sm);
+}
+
+.tx-status__loading {
+  display: flex;
+  justify-content: center;
+  padding: 2rem 0;
+}
+
+.tx-status__not-found,
+.tx-status__error {
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.tx-status__error {
+  color: var(--destructive);
+}
+
+.tx-status__not-found p:first-child {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.tx-status__not-found,
+.tx-status__error {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: center;
+}
