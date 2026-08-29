@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { CSRF_COOKIE_NAME } from './lib/api/csrf';
 
 // Allow the app to reach its configured backend API (e.g. a local http origin
 // during development) without loosening connect-src to all origins.
@@ -41,6 +42,21 @@ export function proxy(request: NextRequest) {
     request: { headers: requestHeaders },
   });
   response.headers.set('Content-Security-Policy', cspHeader);
+
+  // Issue a double-submit CSRF cookie for cookie-authenticated mutations
+  // (#1417). Deliberately NOT httpOnly: client.ts reads this value and
+  // echoes it back as an X-CSRF-Token header, so the backend can confirm
+  // the request came from JS running on this origin, not a forged
+  // cross-site form/image submission. Only set once per session — a fresh
+  // value on every request would break in-flight requests.
+  if (!request.cookies.get(CSRF_COOKIE_NAME)) {
+    response.cookies.set(CSRF_COOKIE_NAME, crypto.randomUUID(), {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+    });
+  }
 
   return response;
 }

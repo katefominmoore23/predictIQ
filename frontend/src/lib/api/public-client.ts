@@ -14,6 +14,7 @@
 
 import { getEnvConfig } from '../env';
 import { apiCache, CACHE_TTL } from './cache';
+import { csrfHeaders, isCsrfTokenError } from './csrf';
 import type { paths, components } from './schema';
 
 const config = getEnvConfig();
@@ -211,7 +212,7 @@ async function request<T>(
     try {
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders(method) },
         body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
         signal,
       });
@@ -242,8 +243,12 @@ async function request<T>(
           err = {};
         }
         const errObj = (typeof err === 'object' && err !== null) ? err as Record<string, unknown> : {};
-        const message = (errObj['message'] as string | undefined) ?? res.statusText ?? `HTTP ${res.status}`;
         const code = (errObj['code'] as string | undefined) ?? "UNKNOWN_ERROR";
+        // A stale/expired CSRF token gets a distinct, actionable message
+        // instead of surfacing as a confusing generic 403 (#1417).
+        const message = isCsrfTokenError(res.status, code)
+          ? "Your session has expired. Please refresh the page and try again."
+          : (errObj['message'] as string | undefined) ?? res.statusText ?? `HTTP ${res.status}`;
         const details = errObj['details'] as Record<string, unknown> | undefined;
         throw new ApiError(message, res.status, code, details);
       }
