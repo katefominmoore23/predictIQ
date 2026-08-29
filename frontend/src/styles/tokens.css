@@ -65,10 +65,49 @@
   color-scheme: dark;
 }
 
-/* ---- LIGHT variant ----
-   Applies when the user explicitly chooses light, or when the OS prefers light
-   and no explicit dark choice has been made. */
-html.light-mode {
+/* ---- DARK theme (explicit) ----
+   Layered on top of the base tokens in :root. Declares an override for every
+   semantic token so the dark theme is complete under one selector. The values
+   match the dark :root default; the attribute is only set when the user
+   explicitly chose dark, and since it outranks the prefers-color-scheme block
+   below (scoped to :not([data-theme])), an OS-level theme change can never
+   override an explicit dark choice. */
+[data-theme='dark'] {
+  /* Brand accents (mode-independent, restated for a complete dark theme) */
+  --gold: #f59e0b;
+  --gold-soft: #fbbf24;
+  --purple: #8b5cf6;
+  --purple-soft: #a78bfa;
+  --grad-brand: linear-gradient(135deg, var(--gold) 0%, var(--gold-soft) 45%, var(--purple) 100%);
+
+  --bg: #0b1120;
+  --bg-deep: #070b16;
+  --surface: #111a2e;
+  --surface-2: #16223b;
+  --surface-glass: rgba(17, 26, 46, 0.6);
+  --border: #22304d;
+  --border-strong: #33436a;
+  --fg: #f8fafc;
+  --fg-muted: #9fb0cc;
+  --fg-subtle: #6b7c9c;
+  --primary: var(--gold);
+  --on-primary: #0f172a;
+  --accent: var(--purple);
+  --destructive: #f87171;
+  --success: #34d399;
+  --ring: var(--gold);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.7);
+  --shadow-glow-gold: 0 0 0 1px rgba(245, 158, 11, 0.15), 0 20px 60px -20px rgba(245, 158, 11, 0.35);
+  --shadow-glow-purple: 0 24px 70px -24px rgba(139, 92, 246, 0.45);
+
+  color-scheme: dark;
+}
+
+/* ---- LIGHT theme (explicit) ----
+   Applies when the user explicitly chose light. */
+[data-theme='light'] {
   --bg: #f7f9fc;
   --bg-deep: #eef2f9;
   --surface: #ffffff;
@@ -91,8 +130,13 @@ html.light-mode {
   color-scheme: light;
 }
 
+/* ---- System-following (no explicit choice) ----
+   With no stored preference, follow prefers-color-scheme live: the media
+   query re-evaluates on OS-level changes with no page reload. The
+   :not([data-theme]) guard keeps an explicit stored choice (dark or light)
+   in effect even when the OS preference changes. */
 @media (prefers-color-scheme: light) {
-  html:not(.dark-mode) {
+  :root:not([data-theme]) {
     --bg: #f7f9fc;
     --bg-deep: #eef2f9;
     --surface: #ffffff;
