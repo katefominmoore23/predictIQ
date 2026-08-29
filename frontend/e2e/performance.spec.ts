@@ -1,5 +1,29 @@
 import { test, expect } from '@playwright/test';
 
+// Performance budgets (ms). Configurable via env so CI can tune without code changes.
+const LCP_BUDGET_MS = parseInt(process.env.LCP_BUDGET_MS || '2500', 10);
+const TTI_BUDGET_MS = parseInt(process.env.TTI_BUDGET_MS || '3800', 10);
+
+// A realistic, non-trivial statistics payload. An empty/zeroed dataset would
+// understate real-world render cost, since the numbers still have to be
+// fetched, formatted (toLocaleString) and painted.
+const SEEDED_STATISTICS = { total_markets: 128, total_volume: 4820000, active_markets: 37 };
+
+async function measureLCP(page: import('@playwright/test').Page): Promise<number> {
+  return page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        let lcp = 0;
+        new PerformanceObserver((list) => {
+          const entries = list.getEntries();
+          const last = entries[entries.length - 1] as any;
+          if (last) lcp = last.startTime;
+        }).observe({ type: 'largest-contentful-paint', buffered: true });
+        setTimeout(() => resolve(lcp), 2000);
+      })
+  );
+}
+
 test.describe('Performance Metrics', () => {
   test('should load page within acceptable time', async ({ page }) => {
     const startTime = Date.now();
@@ -251,5 +275,46 @@ test.describe('Rendering Performance', () => {
     // Page should still be responsive
     await emailInput.fill('final@example.com');
     await expect(emailInput).toHaveValue('final@example.com');
+  });
+});
+
+// The markets list/detail pages (#57, #58) haven't shipped yet. Statistics is
+// the one page today that does real data fetching and rendering rather than
+// static content, so it stands in as the "data page" budget target — this
+// block is where markets list/detail LCP budgets get added once those routes
+// exist.
+test.describe('Performance Budgets - Data Pages', () => {
+  test.beforeEach(async ({ page }) => {
+    // Seeded, non-trivial dataset — an empty response would understate
+    // real-world load time since it skips formatting/rendering cost.
+    await page.route('**/api/**/statistics', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(SEEDED_STATISTICS),
+      })
+    );
+  });
+
+  test('statistics section LCP should stay within budget', async ({ page }) => {
+    const lcpPromise = measureLCP(page);
+    await page.goto('/');
+    await expect(page.getByText(/128/)).toBeVisible();
+
+    const lcp = await lcpPromise;
+    expect(lcp).toBeGreaterThan(0);
+    expect(lcp).toBeLessThan(LCP_BUDGET_MS);
+  });
+
+  test('statistics section should become interactive within budget', async ({ page }) => {
+    const startTime = Date.now();
+
+    await page.goto('/');
+    await expect(page.getByText(/128/)).toBeVisible();
+    // Confirm the page actually accepts input, not just that content painted.
+    await page.getByLabel(/email address/i).click();
+
+    const tti = Date.now() - startTime;
+    expect(tti).toBeLessThan(TTI_BUDGET_MS);
   });
 });
