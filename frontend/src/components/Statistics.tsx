@@ -22,7 +22,7 @@ interface StatisticsData {
 
 export const Statistics: React.FC = () => {
   const fetchStatistics = React.useCallback((signal: AbortSignal) => api.getStatistics(signal), []);
-  const { data, loading, error, execute } = useAsync<StatisticsData>(
+  const { data, status, error, retry } = useAsync<StatisticsData>(
     fetchStatistics,
     { immediate: true }
   );
@@ -66,7 +66,7 @@ export const Statistics: React.FC = () => {
   );
 
   const handleRetry = () => {
-    execute();
+    retry();
   };
 
   if (error) {
