@@ -21,6 +21,10 @@ const MARKET_PAYLOAD = {
   resolved_outcome: null,
 };
 
+// A second market whose close time has already passed — used to exercise the
+// "resolve after close succeeds" path alongside the premature-resolve guard.
+const CLOSED_MARKET_ID = 100;
+
 test.describe('Market Creation Flow', () => {
   test.beforeEach(async ({ page }) => {
     // Mock: create market (POST /api/v1/blockchain/markets)
@@ -113,6 +117,36 @@ test.describe('Market Creation Flow', () => {
         body: JSON.stringify({ tx_hash: CLAIM_TX, amount: '390', status: 'confirmed' }),
       })
     );
+
+    // Mock: resolve — the still-open market is rejected with contract error 104
+    // (MarketStillActive); the already-closed market resolves successfully.
+    await page.route(`**/api/v1/markets/${MARKET_ID}/resolve`, (route) => {
+      if (route.request().method() === 'POST') {
+        route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 'CONTRACT_ERROR',
+            message: 'This market is still active and cannot be finalized yet.',
+            details: { contract_code: 104 },
+          }),
+        });
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.route(`**/api/v1/markets/${CLOSED_MARKET_ID}/resolve`, (route) => {
+      if (route.request().method() === 'POST') {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ invalidated_keys: 3 }),
+        });
+      } else {
+        route.continue();
+      }
+    });
   });
 
   test('create market — returns market_id and pending tx hash', async ({ page }) => {
@@ -180,6 +214,31 @@ test.describe('Market Creation Flow', () => {
 
     expect(bet.tx_hash).toBeTruthy();
     expect(bet.status).toBe('pending');
+  });
+
+  test('resolve attempt before close time is blocked (contract error 104)', async ({ page }) => {
+    await page.goto('/');
+
+    const res = await page.evaluate(async (marketId: number) => {
+      const r = await fetch(`/api/v1/markets/${marketId}/resolve`, { method: 'POST' });
+      return { status: r.status, body: await r.json() };
+    }, MARKET_ID);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.contract_code).toBe(104);
+    expect(res.body.message).toMatch(/still active/i);
+  });
+
+  test('resolve succeeds once the market has closed', async ({ page }) => {
+    await page.goto('/');
+
+    const res = await page.evaluate(async (marketId: number) => {
+      const r = await fetch(`/api/v1/markets/${marketId}/resolve`, { method: 'POST' });
+      return { status: r.status, body: await r.json() };
+    }, CLOSED_MARKET_ID);
+
+    expect(res.status).toBe(200);
+    expect(res.body.invalidated_keys).toBeGreaterThan(0);
   });
 
   test('oracle resolves created market', async ({ page }) => {
@@ -274,6 +333,23 @@ test.describe('Market Creation Flow', () => {
       MARKET_ID
     );
     expect(oracle.resolved_at).toBeTruthy();
+
+    // Step 5b: A resolve attempt on the still-open market is blocked (contract
+    // error 104, MarketStillActive) — closing must happen before resolving.
+    const prematureResolve = await page.evaluate(async (marketId: number) => {
+      const r = await fetch(`/api/v1/markets/${marketId}/resolve`, { method: 'POST' });
+      return { status: r.status, body: await r.json() };
+    }, MARKET_ID);
+    expect(prematureResolve.status).toBe(400);
+    expect(prematureResolve.body.details.contract_code).toBe(104);
+
+    // Step 5c: Resolving a market that has actually closed succeeds.
+    const resolve = await page.evaluate(async (marketId: number) => {
+      const r = await fetch(`/api/v1/markets/${marketId}/resolve`, { method: 'POST' });
+      return { status: r.status, body: await r.json() };
+    }, CLOSED_MARKET_ID);
+    expect(resolve.status).toBe(200);
+    expect(resolve.body.invalidated_keys).toBeGreaterThan(0);
 
     // Step 6: Claim winnings
     const claim = await page.evaluate(

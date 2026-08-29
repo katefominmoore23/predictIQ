@@ -32,6 +32,9 @@ type HttpMethod = "GET" | "POST" | "DELETE";
  */
 const PATHS = {
   resolveMarket: "/api/v1/markets/{market_id}/resolve",
+  blockchainReplay: "/api/blockchain/replay",
+  content: "/api/v1/content",
+  auditLogs: "/api/v1/audit/logs",
 } satisfies Record<string, keyof paths>;
 
 // ---------------------------------------------------------------------------
@@ -92,6 +95,7 @@ interface RequestOptions {
 }
 
 import { ApiError } from './public-client';
+import { csrfHeaders, isCsrfTokenError } from './csrf';
 
 async function request<T>(
   method: HttpMethod,
@@ -124,7 +128,7 @@ async function request<T>(
     try {
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders(method) },
         body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
         signal,
       });
@@ -147,8 +151,12 @@ async function request<T>(
         let err: unknown;
         try { err = await res.json(); } catch { err = {}; }
         const errObj = (typeof err === 'object' && err !== null) ? err as Record<string, unknown> : {};
-        const message = (errObj['message'] as string | undefined) ?? res.statusText ?? `HTTP ${res.status}`;
         const code = (errObj['code'] as string | undefined) ?? "UNKNOWN_ERROR";
+        // A stale/expired CSRF token gets a distinct, actionable message
+        // instead of surfacing as a confusing generic 403 (#1417).
+        const message = isCsrfTokenError(res.status, code)
+          ? "Your session has expired. Please refresh the page and try again."
+          : (errObj['message'] as string | undefined) ?? res.statusText ?? `HTTP ${res.status}`;
         const details = errObj['details'] as Record<string, unknown> | undefined;
         throw new ApiError(message, res.status, code, details);
       }
@@ -278,6 +286,26 @@ export const CONTRACT_ERROR_MESSAGES: Record<number, string> = {
   123: "Too many outcomes provided for this market.",
   124: "Too many winners specified for payout calculation.",
   125: "This payout mode is not supported.",
+  152: "The migration data failed validation and cannot proceed.",
+  154: "An arithmetic operation overflowed. Please try again.",
+  159: "An arithmetic overflow occurred during calculation.",
+
+  // Market Lifecycle
+  160: "The provided time range is invalid.",
+
+  // Betting
+  155: "This reward has already been claimed.",
+  156: "There are no winnings available to claim for this market.",
+  157: "The provided referrer address is invalid or not registered.",
+
+  // Resolution & Disputes
+  158: "The resolution deadline for this market has passed.",
+
+  // Ownership & Token Operations
+  149: "No pending transfer was found for this identifier.",
+  150: "You are not the pending owner of this asset.",
+  151: "This token account is frozen and cannot be used.",
+  153: "This asset has been clawed back by the issuer.",
 };
 
 /**
@@ -302,6 +330,11 @@ export const api = {
       fillPath(PATHS.resolveMarket, 'market_id', marketId),
       { cacheTags: [CacheTag.MARKETS, CacheTag.BLOCKCHAIN, CacheTag.STATISTICS], signal },
     ),
+
+  getAuditLogs: (params: Record<string, string | number | undefined> = {}, signal?: AbortSignal) =>
+    request<components['schemas']['AnyObject']>("GET", PATHS.auditLogs, {
+      params, cacheTtl: CACHE_TTL.SHORT, cacheTags: [CacheTag.AUDIT], signal,
+    }),
 
   emailPreview: (templateName: string, signal?: AbortSignal) =>
     request<Record<string, unknown>>("GET", `/api/v1/email/preview/${encodeURIComponent(templateName)}`, {
@@ -331,4 +364,18 @@ export const api = {
       cacheTags: [CacheTag.EMAIL],
       signal,
     }),
+
+  blockchainReplay: (body: { from_ledger: number }, signal?: AbortSignal) =>
+    request<components['schemas']['AnyObject']>(
+      "POST",
+      PATHS.blockchainReplay,
+      { body, cacheTags: [CacheTag.BLOCKCHAIN], signal }
+    ),
+
+  saveContent: (body: Record<string, unknown>, signal?: AbortSignal) =>
+    request<components['schemas']['AnyObject']>(
+      "POST",
+      PATHS.content,
+      { body, cacheTags: [CacheTag.STATISTICS, CacheTag.MARKETS], signal }
+    ),
 };
