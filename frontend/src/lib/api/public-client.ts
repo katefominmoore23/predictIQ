@@ -210,6 +210,20 @@ async function request<T>(
     }
   }
 
+  // De-dupe concurrent GETs to the same URL: two components reading the same
+  // resource at once share a single network request (#1334). Mutations are never
+  // de-duped - each write is a distinct action.
+  if (method === "GET") {
+    return apiCache.dedupe(url, () => sendWithRetries<T>(method, url, options));
+  }
+  return sendWithRetries<T>(method, url, options);
+}
+
+async function sendWithRetries<T>(
+  method: HttpMethod,
+  url: string,
+  options: RequestOptions
+): Promise<T> {
   const maxRetries = options.maxRetries ?? DEFAULT_RETRY_CONFIG.maxRetries;
   const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   let lastError: Error | null = null;
