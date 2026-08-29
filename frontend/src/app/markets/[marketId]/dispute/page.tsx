@@ -50,7 +50,8 @@ export default function DisputePage({ params }: DisputePageProps) {
   const tx = useTransaction<{ marketId: string; reason: string }>();
 
   const load = useCallback((signal: AbortSignal) => fetchDisputeStatus(marketId, signal), [marketId]);
-  const { data, loading, error: loadError, execute: reload } = useAsync(load, { immediate: true });
+  const { data, status, error: loadError, retry: reload } = useAsync(load, { immediate: true });
+  const loading = status === 'loading';
 
   const filingError = tx.status === 'failed' && tx.error ? describeWriteError(tx.error, 'resolve') : null;
 
