@@ -18,6 +18,7 @@ export {
 
 import { api as publicApi, CacheTag, fillPath } from './public-client';
 import { apiCache, CACHE_TTL } from './cache';
+import { reportRateLimited } from './rateLimit';
 import { getEnvConfig } from '../env';
 import type { paths, components } from './schema';
 
@@ -136,11 +137,15 @@ async function request<T>(
       clear();
 
       if (!res.ok) {
-        if (res.status === 429 && attempt < maxRetries) {
+        if (res.status === 429) {
           const retryAfter = res.headers.get('Retry-After');
-          const delayMs = getRetryDelay(attempt, retryAfter ? parseInt(retryAfter, 10) : undefined);
-          await sleep(delayMs);
-          continue;
+          const retryAfterSec = retryAfter ? parseInt(retryAfter, 10) : NaN;
+          reportRateLimited(Number.isNaN(retryAfterSec) ? 1 : retryAfterSec);
+          if (attempt < maxRetries) {
+            const delayMs = getRetryDelay(attempt, Number.isNaN(retryAfterSec) ? undefined : retryAfterSec);
+            await sleep(delayMs);
+            continue;
+          }
         }
 
         if (res.status >= 500 && attempt < maxRetries && (method === "GET" || options.idempotent)) {

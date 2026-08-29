@@ -15,6 +15,7 @@
 import { getEnvConfig } from '../env';
 import { apiCache, CACHE_TTL } from './cache';
 import { csrfHeaders, isCsrfTokenError } from './csrf';
+import { reportRateLimited } from './rateLimit';
 import type { paths, components } from './schema';
 
 const config = getEnvConfig();
@@ -243,9 +244,12 @@ async function sendWithRetries<T>(
 
       if (!res.ok) {
         if (res.status === 429) {
+          const retryAfter = res.headers.get('Retry-After');
+          const retryAfterSec = retryAfter ? parseInt(retryAfter, 10) : NaN;
+          // Surface the cooldown to the UI (one shared countdown toast, #1339).
+          reportRateLimited(Number.isNaN(retryAfterSec) ? 1 : retryAfterSec);
           if (attempt < maxRetries) {
-            const retryAfter = res.headers.get('Retry-After');
-            const delayMs = getRetryDelay(attempt, retryAfter ? parseInt(retryAfter, 10) : undefined);
+            const delayMs = getRetryDelay(attempt, Number.isNaN(retryAfterSec) ? undefined : retryAfterSec);
             await sleep(delayMs);
             continue;
           }
