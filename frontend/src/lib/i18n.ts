@@ -38,16 +38,16 @@ const translations: LocaleData = {
     features: {
       heading: 'Key Features',
       decentralized: {
-        title: 'Fully Decentralized',
-        description: 'No central authority. Markets run on smart contracts with transparent, immutable rules.',
+        title: 'Multi-outcome markets',
+        description: 'Create markets with two or many outcomes. Rules live in an on-chain Soroban contract, not a company database.',
       },
       secure: {
-        title: 'Secure & Audited',
-        description: 'Smart contracts audited by leading security firms. Your funds are protected by battle-tested code.',
+        title: 'Hybrid oracle + community resolution',
+        description: 'Markets resolve from Pyth and Reflector oracle data, with a community-vote fallback and a dispute window when the feeds disagree.',
       },
       fast: {
-        title: 'Lightning Fast',
-        description: 'Built on Stellar for near-instant transactions and minimal fees. Trade without waiting.',
+        title: 'Stellar speed, with referrals',
+        description: 'Near-instant settlement and low fees on Stellar. Bring others in and earn a share through the built-in referral program.',
       },
     },
     howItWorks: {

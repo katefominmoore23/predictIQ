@@ -18,9 +18,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
   const { isDarkMode, toggleDarkMode } = useDarkMode();
 
   const features = [
-    { icon: '/icons/decentralized.svg', title: t('features.decentralized.title'), description: t('features.decentralized.description') },
-    { icon: '/icons/secure.svg', title: t('features.secure.title'), description: t('features.secure.description') },
-    { icon: '/icons/fast.svg', title: t('features.fast.title'), description: t('features.fast.description') },
+    { icon: '/icons/decentralized.svg', title: t('features.decentralized.title'), description: t('features.decentralized.description'), href: '/markets' },
+    { icon: '/icons/secure.svg', title: t('features.secure.title'), description: t('features.secure.description'), href: '/markets' },
+    { icon: '/icons/fast.svg', title: t('features.fast.title'), description: t('features.fast.description'), href: '/markets' },
   ];
 
   const steps = [
