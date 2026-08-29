@@ -29,6 +29,8 @@ const translations: LocaleData = {
       emailPlaceholder: 'you@example.com',
       emailRequired: 'Email is required',
       emailInvalid: 'Please enter a valid email address',
+      primaryCta: 'Explore markets',
+      secondaryCta: 'See how it works',
       submitButton: 'Get Early Access',
       subscribedButton: 'Subscribed!',
       successMessage: 'Successfully subscribed to updates!',

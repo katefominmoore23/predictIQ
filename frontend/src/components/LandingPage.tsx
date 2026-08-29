@@ -117,8 +117,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
           <p className="hero-description">
             {t('hero.description')}
           </p>
-          
-          {/* CTA Form */}
+
+          {/* Primary CTAs into the live product. Plain links (not the newsletter
+              form) so the hero works with JS pending and needs no client state. */}
+          <div className="hero-cta-group">
+            <a href="/markets" className="hero-cta hero-cta--primary">
+              {t('hero.primaryCta')}
+            </a>
+            <a href="#how-it-works" className="hero-cta hero-cta--secondary">
+              {t('hero.secondaryCta')}
+            </a>
+          </div>
+
+          {/* Early-access signup */}
           <NewsletterSignup />
         </section>
 
