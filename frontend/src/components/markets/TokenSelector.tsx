@@ -1,48 +1,94 @@
-import React from 'react';
+'use client';
 
-export interface MarketToken {
-  symbol: string;
-  decimals: number;
-}
+import React from 'react';
+import { SUPPORTED_ASSETS, type SupportedAsset } from '../../lib/assets';
+import './TokenSelector.css';
 
 interface TokenSelectorProps {
-  token: MarketToken;
-  className?: string;
+  id: string;
+  value: string;
+  onChange: (assetId: string) => void;
+  'aria-invalid'?: boolean;
+  'aria-describedby'?: string;
 }
 
 /**
- * Formats a raw integer amount (as returned by the contract) into a
- * human-readable string using the market's actual token decimals — never
- * a hardcoded default. Uses BigInt math so high-decimal tokens (e.g. 18)
- * don't lose precision to floating point.
+ * Searchable/selectable list of settlement assets (both Soroban tokens and
+ * classic Stellar assets). Selection is restricted to `SUPPORTED_ASSETS` —
+ * there is no free-text path to submit an unsupported or malformed asset id.
  */
-export const formatTokenAmount = (rawAmount: string | bigint, token: MarketToken): string => {
-  const amount = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount);
-  const negative = amount < 0n;
-  const abs = negative ? -amount : amount;
+export function TokenSelector({ id, value, onChange, ...aria }: TokenSelectorProps) {
+  const [query, setQuery] = React.useState('');
+  const [open, setOpen] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
 
-  const divisor = 10n ** BigInt(token.decimals);
-  const whole = abs / divisor;
-  const fraction = abs % divisor;
+  const selected = SUPPORTED_ASSETS.find((asset) => asset.id === value);
 
-  const fractionStr =
-    token.decimals > 0 ? '.' + fraction.toString().padStart(token.decimals, '0').replace(/0+$/, '') : '';
+  const filtered = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return SUPPORTED_ASSETS;
+    return SUPPORTED_ASSETS.filter(
+      (asset) => asset.code.toLowerCase().includes(q) || asset.label.toLowerCase().includes(q)
+    );
+  }, [query]);
 
-  const trimmedFraction = fractionStr === '.' ? '' : fractionStr;
+  React.useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-  return `${negative ? '-' : ''}${whole.toString()}${trimmedFraction} ${token.symbol}`;
-};
+  const selectAsset = (asset: SupportedAsset) => {
+    onChange(asset.id);
+    setQuery('');
+    setOpen(false);
+  };
 
-/** Displays the settlement token badge for a market, read from market data. */
-export const TokenSelector: React.FC<TokenSelectorProps> = ({ token, className = '' }) => {
   return (
-    <span
-      className={`token-selector ${className}`.trim()}
-      title={`${token.decimals} decimals`}
-    >
-      {token.symbol}
-    </span>
+    <div className="token-selector" ref={containerRef}>
+      <input
+        id={id}
+        type="text"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={`${id}-listbox`}
+        aria-autocomplete="list"
+        autoComplete="off"
+        value={open ? query : selected?.label ?? ''}
+        placeholder="Search settlement asset…"
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        {...aria}
+      />
+      {open && (
+        <ul id={`${id}-listbox`} role="listbox" className="token-selector__list">
+          {filtered.length === 0 && <li className="token-selector__empty">No matching assets</li>}
+          {filtered.map((asset) => (
+            <li key={asset.id}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={asset.id === value}
+                className="token-selector__option"
+                onClick={() => selectAsset(asset)}
+              >
+                <span className="token-selector__code">{asset.code}</span>
+                <span className="token-selector__label">{asset.label}</span>
+                <span className="token-selector__kind">
+                  {asset.kind === 'soroban_token' ? 'Soroban token' : 'Classic asset'}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
-};
-
-export default TokenSelector;
+}

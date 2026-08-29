@@ -1,0 +1,121 @@
+.market-create {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--space-section) 1.5rem;
+  color: var(--fg);
+}
+
+.market-create__heading {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  margin-bottom: 0.5rem;
+}
+
+.market-create__intro {
+  color: var(--fg-muted);
+  margin-bottom: 2rem;
+}
+
+.market-create__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.5rem;
+}
+
+.market-create__field label {
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+
+.market-create__field input,
+.market-create__field textarea,
+.market-create__field select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  padding: 0.65rem 0.85rem;
+  font-size: var(--text-base);
+  font-family: var(--font-body);
+}
+
+.market-create__field input:focus,
+.market-create__field textarea:focus,
+.market-create__field select:focus {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.market-create__error {
+  color: var(--destructive);
+  font-size: var(--text-xs);
+}
+
+.market-create__outcomes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.market-create__outcome-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.market-create__outcome-row input {
+  flex: 1;
+}
+
+.market-create__outcome-remove {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  padding: 0 0.75rem;
+  cursor: pointer;
+}
+
+.market-create__add-outcome {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  margin-top: 0.4rem;
+}
+
+.market-create__submit {
+  background: var(--grad-brand);
+  color: var(--on-primary);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 0.75rem 2rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.market-create__submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.market-create__success {
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid var(--success);
+  color: var(--success);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.market-create__form-error {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid var(--destructive);
+  color: var(--destructive);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.5rem;
+}
