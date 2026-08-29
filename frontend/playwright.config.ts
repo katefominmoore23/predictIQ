@@ -14,6 +14,7 @@ const MOCKED_SPECS = [
   'e2e/mobile.spec.ts',
   'e2e/performance.spec.ts',
   'e2e/visual-regression.spec.ts',
+  'e2e/newsletter.spec.ts',
 ];
 
 // Specs that require a real backend. Only run on merge to main via the

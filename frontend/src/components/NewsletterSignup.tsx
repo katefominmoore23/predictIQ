@@ -1,271 +1,209 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useI18n } from '../lib/hooks/useI18n';
 import { api, ApiError } from '../lib/api/public-client';
 import { LoadingSpinner } from './LoadingSpinner';
+
+const CLIENT_SUBMIT_COOLDOWN_SECS = 3;
+const DEFAULT_RATE_LIMIT_COOLDOWN_SECS = 30;
 
 export interface NewsletterSignupProps {
   className?: string;
   source?: string;
-  heading?: string;
-  description?: string;
-  placeholder?: string;
-  buttonText?: string;
-  onSuccess?: (message: string) => void;
+  onSuccess?: () => void;
 }
 
-export type SignupStatus = 'idle' | 'loading' | 'success' | 'already-subscribed' | 'error';
-
-/**
- * NewsletterSignup Component
- *
- * Implements double opt-in newsletter subscription with distinct UI states for:
- * 1. Double opt-in pending: "Please check your inbox to confirm"
- * 2. Already subscribed: displays server's specific message
- * 3. Error state: displays validation or network failure
- */
 export const NewsletterSignup: React.FC<NewsletterSignupProps> = ({
-  className = '',
-  source = 'footer',
-  heading = 'Subscribe to our Newsletter',
-  description = 'Get the latest prediction market insights and updates delivered straight to your inbox.',
-  placeholder = 'Enter your email address',
-  buttonText = 'Subscribe',
+  className,
+  source,
   onSuccess,
 }) => {
+  const { t } = useI18n();
   const [email, setEmail] = useState('');
-  const [status, setStatus] = useState<SignupStatus>('idle');
-  const [serverMessage, setServerMessage] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [apiError, setApiError] = useState('');
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const validateEmail = (val: string): boolean => {
-    const trimmed = val.trim();
-    if (!trimmed) {
-      setEmailError('Email address is required.');
-      return false;
+  // Rate limiting / Cooldown state
+  const [cooldown, setCooldown] = useState(0);
+  const [isServerRateLimited, setIsServerRateLimited] = useState(false);
+  const lastSubmittedEmailRef = useRef<string>('');
+
+  // Countdown timer effect
+  useEffect(() => {
+    if (cooldown <= 0) {
+      if (isServerRateLimited) {
+        setIsServerRateLimited(false);
+      }
+      return;
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(trimmed)) {
-      setEmailError('Please enter a valid email address.');
-      return false;
-    }
+
+    const timer = setInterval(() => {
+      setCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [cooldown, isServerRateLimited]);
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newEmail = e.target.value;
+    setEmail(newEmail);
     setEmailError('');
-    return true;
-  };
+    setApiError('');
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setEmail(e.target.value);
-    if (emailError) setEmailError('');
-    if (status === 'error' || status === 'already-subscribed') {
-      setStatus('idle');
-      setServerMessage('');
+    // If user edited/corrected the email, allow immediate submit unless under a global 429 server lockout
+    if (!isServerRateLimited && newEmail !== lastSubmittedEmailRef.current) {
+      setCooldown(0);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (status === 'loading') return;
-
-    if (!validateEmail(email)) {
+    if (isLoading || isSubmitted) {
       return;
     }
 
-    setStatus('loading');
-    setServerMessage('');
+    // Client-side rate-limit / rapid resubmit check
+    if (cooldown > 0 && email === lastSubmittedEmailRef.current) {
+      setApiError(`Please wait ${cooldown} second${cooldown > 1 ? 's' : ''} before resubmitting.`);
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email) {
+      setEmailError(t('hero.emailRequired'));
+      return;
+    }
+    if (!emailRegex.test(email)) {
+      setEmailError(t('hero.emailInvalid'));
+      return;
+    }
+
     setEmailError('');
+    setApiError('');
+    setIsLoading(true);
+    lastSubmittedEmailRef.current = email;
 
     try {
-      const response = await api.newsletterSubscribe({
-        email: email.trim(),
-        source,
-      });
-
-      const messageText = response.message || '';
-      const isAlreadySubscribed = /already\s*(subscribed|registered)/i.test(messageText);
-
-      if (response.success) {
-        if (isAlreadySubscribed) {
-          setStatus('already-subscribed');
-          setServerMessage(messageText || 'You are already subscribed to this newsletter.');
-        } else {
-          setStatus('success');
-          setServerMessage(
-            messageText || 'Please check your inbox to confirm your subscription.'
-          );
-          onSuccess?.(messageText);
-        }
+      const result = await api.newsletterSubscribe({ email, source });
+      if (result.success) {
+        setIsSubmitted(true);
+        onSuccess?.();
       } else {
-        if (isAlreadySubscribed) {
-          setStatus('already-subscribed');
-          setServerMessage(messageText || 'You are already subscribed to this newsletter.');
-        } else {
-          setStatus('error');
-          setServerMessage(messageText || 'Unable to subscribe. Please try again.');
-        }
+        setApiError(result.message || 'Subscription failed');
+        // Set short client-side cooldown on same email to prevent spamming
+        setCooldown(CLIENT_SUBMIT_COOLDOWN_SECS);
       }
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        const isDuplicate =
-          err.status === 409 ||
-          err.code === 'ALREADY_SUBSCRIBED' ||
-          /already\s*(subscribed|registered)/i.test(err.message);
-
-        if (isDuplicate) {
-          setStatus('already-subscribed');
-          setServerMessage(err.message || 'You are already subscribed to this newsletter.');
-        } else {
-          setStatus('error');
-          setServerMessage(err.message || 'Failed to subscribe. Please check your connection.');
-        }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 429) {
+        setIsServerRateLimited(true);
+        const retrySeconds = (err.details?.retry_after as number) || DEFAULT_RATE_LIMIT_COOLDOWN_SECS;
+        setCooldown(retrySeconds);
+        setApiError(`Too many requests. Please wait ${retrySeconds}s before trying again.`);
       } else {
-        const msg = err instanceof Error ? err.message : 'An unexpected error occurred.';
-        if (/already\s*(subscribed|registered)/i.test(msg)) {
-          setStatus('already-subscribed');
-          setServerMessage(msg);
-        } else {
-          setStatus('error');
-          setServerMessage(msg);
-        }
+        setApiError(err instanceof Error ? err.message : 'Network error occurred');
+        // Short cooldown on failure for same email
+        setCooldown(CLIENT_SUBMIT_COOLDOWN_SECS);
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleReset = () => {
-    setEmail('');
-    setStatus('idle');
-    setServerMessage('');
-    setEmailError('');
-  };
+  const isButtonDisabled =
+    isLoading ||
+    isSubmitted ||
+    (cooldown > 0 && email === lastSubmittedEmailRef.current) ||
+    isServerRateLimited;
 
   return (
-    <section
-      className={`newsletter-signup-container ${className}`}
-      aria-labelledby="newsletter-signup-heading"
+    <form
+      onSubmit={handleSubmit}
+      aria-labelledby="signup-heading"
+      aria-busy={isLoading}
+      noValidate
+      className={className}
     >
-      <div className="newsletter-header">
-        {heading && (
-          <h3 id="newsletter-signup-heading" className="newsletter-title">
-            {heading}
-          </h3>
+      <h2 id="signup-heading" className="visually-hidden">
+        {t('hero.signupHeading')}
+      </h2>
+
+      <div className="form-group">
+        <label htmlFor="email-input">
+          {t('hero.emailLabel')}
+          <span aria-label="required" className="required">
+            *
+          </span>
+        </label>
+        <input
+          id="email-input"
+          type="email"
+          required
+          value={email}
+          onChange={handleEmailChange}
+          aria-required="true"
+          aria-invalid={!!emailError || !!apiError}
+          aria-describedby={emailError ? 'email-error' : apiError ? 'api-error' : undefined}
+          placeholder={t('hero.emailPlaceholder')}
+          disabled={isSubmitted || isLoading}
+        />
+        {emailError && (
+          <span id="email-error" role="alert" className="error-message">
+            {emailError}
+          </span>
         )}
-        {description && <p className="newsletter-description">{description}</p>}
+        {apiError && (
+          <span id="api-error" role="alert" className="error-message">
+            {apiError}
+          </span>
+        )}
       </div>
 
-      {status === 'success' ? (
-        <div
-          className="newsletter-success-box"
-          role="status"
-          aria-live="polite"
-          tabIndex={0}
-        >
-          <div className="newsletter-success-icon" aria-hidden="true">
-            ✉️
-          </div>
-          <div className="newsletter-success-content">
-            <h4 className="newsletter-state-title">Check your inbox to confirm</h4>
-            <p className="newsletter-state-message">
-              {serverMessage ||
-                'We sent a confirmation link to your email address. Please click it to complete your subscription.'}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="newsletter-reset-button"
-            onClick={handleReset}
-          >
-            Subscribe another email
-          </button>
-        </div>
-      ) : (
-        <form
-          onSubmit={handleSubmit}
-          noValidate
-          aria-busy={status === 'loading'}
-          className="newsletter-form"
-        >
-          {status === 'already-subscribed' && (
-            <div
-              className="newsletter-already-subscribed-box"
-              role="status"
-              aria-live="polite"
-            >
-              <div className="newsletter-info-icon" aria-hidden="true">
-                ℹ️
-              </div>
-              <div className="newsletter-info-content">
-                <span className="newsletter-state-title">Already Subscribed</span>
-                <p className="newsletter-state-message">{serverMessage}</p>
-              </div>
-            </div>
-          )}
+      <button
+        type="submit"
+        disabled={isButtonDisabled}
+        aria-disabled={isButtonDisabled}
+        aria-label={
+          isLoading
+            ? 'Submitting...'
+            : isSubmitted
+            ? t('hero.subscribedButton')
+            : cooldown > 0 && email === lastSubmittedEmailRef.current
+            ? `Please wait ${cooldown}s`
+            : t('hero.submitButton')
+        }
+      >
+        {isLoading ? (
+          <LoadingSpinner size="small" aria-label="Submitting" />
+        ) : isSubmitted ? (
+          t('hero.subscribedButton')
+        ) : cooldown > 0 && email === lastSubmittedEmailRef.current ? (
+          `Wait (${cooldown}s)`
+        ) : (
+          t('hero.submitButton')
+        )}
+      </button>
 
-          {status === 'error' && (
-            <div
-              className="newsletter-error-box"
-              role="alert"
-              aria-live="assertive"
-            >
-              <div className="newsletter-error-icon" aria-hidden="true">
-                ⚠️
-              </div>
-              <p className="newsletter-error-message">{serverMessage}</p>
-            </div>
-          )}
-
-          <div className="newsletter-input-group">
-            <label htmlFor="newsletter-email-input" className="visually-hidden">
-              {placeholder}
-            </label>
-            <input
-              id="newsletter-email-input"
-              name="email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={handleInputChange}
-              placeholder={placeholder}
-              disabled={status === 'loading'}
-              aria-required="true"
-              aria-invalid={!!emailError || status === 'error'}
-              aria-describedby={
-                emailError
-                  ? 'newsletter-validation-error'
-                  : serverMessage
-                  ? 'newsletter-status-message'
-                  : undefined
-              }
-              className={`newsletter-email-input ${
-                emailError || status === 'error' ? 'input-error' : ''
-              }`}
-            />
-            <button
-              type="submit"
-              disabled={status === 'loading'}
-              className="newsletter-submit-button"
-              aria-label={status === 'loading' ? 'Submitting subscription...' : buttonText}
-            >
-              {status === 'loading' ? (
-                <LoadingSpinner size="small" aria-label="Submitting subscription..." />
-              ) : (
-                buttonText
-              )}
-            </button>
-          </div>
-
-          {emailError && (
-            <span
-              id="newsletter-validation-error"
-              role="alert"
-              className="newsletter-field-error"
-            >
-              {emailError}
-            </span>
-          )}
-        </form>
-      )}
-    </section>
+      {/* Screen reader announcement */}
+      <div
+        id="form-status"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="visually-hidden"
+      >
+        {isSubmitted && t('hero.successMessage')}
+      </div>
+    </form>
   );
 };
 
