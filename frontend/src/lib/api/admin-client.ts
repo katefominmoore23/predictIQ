@@ -34,6 +34,7 @@ const PATHS = {
   resolveMarket: "/api/v1/markets/{market_id}/resolve",
   blockchainReplay: "/api/blockchain/replay",
   content: "/api/v1/content",
+  auditLogs: "/api/v1/audit/logs",
 } satisfies Record<string, keyof paths>;
 
 // ---------------------------------------------------------------------------
@@ -329,6 +330,11 @@ export const api = {
       fillPath(PATHS.resolveMarket, 'market_id', marketId),
       { cacheTags: [CacheTag.MARKETS, CacheTag.BLOCKCHAIN, CacheTag.STATISTICS], signal },
     ),
+
+  getAuditLogs: (params: Record<string, string | number | undefined> = {}, signal?: AbortSignal) =>
+    request<components['schemas']['AnyObject']>("GET", PATHS.auditLogs, {
+      params, cacheTtl: CACHE_TTL.SHORT, cacheTags: [CacheTag.AUDIT], signal,
+    }),
 
   emailPreview: (templateName: string, signal?: AbortSignal) =>
     request<Record<string, unknown>>("GET", `/api/v1/email/preview/${encodeURIComponent(templateName)}`, {
