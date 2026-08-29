@@ -404,11 +404,25 @@ export const api = {
       signal,
     }),
 
-  newsletterGdprExport: (email: string, signal?: AbortSignal) =>
-    request<{ success: boolean; data: Record<string, unknown> }>(
+  newsletterGdprRequestToken: (body: { email: string }, signal?: AbortSignal) =>
+    request<{ success: boolean; message: string }>(
+      "POST",
+      "/api/v1/newsletter/gdpr/request-token",
+      { body, cacheTags: [CacheTag.NEWSLETTER], signal }
+    ),
+
+  newsletterGdprExport: (
+    body: { email: string; token: string } | string,
+    signal?: AbortSignal
+  ) =>
+    request<{ success: boolean; data: Record<string, unknown>; message?: string }>(
       "POST",
       "/api/v1/newsletter/gdpr/export",
-      { body: { email }, cacheTags: [CacheTag.NEWSLETTER], signal }
+      {
+        body: typeof body === 'string' ? { email: body } : body,
+        cacheTags: [CacheTag.NEWSLETTER],
+        signal,
+      }
     ),
 
   newsletterGdprDelete: (email: string, signal?: AbortSignal) =>
