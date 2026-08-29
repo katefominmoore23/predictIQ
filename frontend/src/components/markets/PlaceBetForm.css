@@ -1,0 +1,98 @@
+/* PlaceBetForm — wallet-gated bet submission on a market's detail page */
+.place-bet-form {
+  max-width: 420px;
+  padding: clamp(1.5rem, 3vw, 2rem);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.place-bet-form > h3 {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  margin: 0;
+}
+
+.place-bet-form fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.place-bet-form legend {
+  font-size: var(--text-sm);
+  opacity: 0.8;
+  padding: 0;
+  margin-bottom: 0.25rem;
+}
+
+.place-bet-form__outcomes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.place-bet-form__outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.place-bet-form__amount-label {
+  font-size: var(--text-sm);
+}
+
+.place-bet-form input[type='number'] {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: inherit;
+  font-size: var(--text-base);
+}
+
+.place-bet-form button[type='submit'] {
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent, #8b5cf6);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.place-bet-form button[type='submit']:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.place-bet-form__error {
+  color: var(--danger, #ef4444);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+.place-bet-form__status {
+  color: var(--success, #22c55e);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+.place-bet-form__hint,
+.place-bet-form__connected,
+.place-bet-form__install-prompt {
+  font-size: var(--text-sm);
+  opacity: 0.85;
+  margin: 0;
+}

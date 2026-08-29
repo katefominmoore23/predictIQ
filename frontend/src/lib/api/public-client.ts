@@ -41,6 +41,13 @@ const PATHS = {
   transactionStatus: "/api/v1/blockchain/tx/{tx_hash}",
 } satisfies Record<string, keyof paths>;
 
+/**
+ * `placeBet` is not yet part of services/api/openapi.yaml (see #78), so its
+ * path is kept out of the `satisfies keyof paths` check above rather than
+ * loosening that check for every other entry.
+ */
+const PLACE_BET_PATH = "/api/v1/blockchain/markets/{market_id}/bets";
+
 /** Fills a `{placeholder}` segment of a schema path template with an encoded value. */
 export function fillPath(template: string, placeholder: string, value: string | number): string {
   return template.replace(`{${placeholder}}`, encodeURIComponent(value));
@@ -406,6 +413,18 @@ export const api = {
       cacheTags: [CacheTag.BLOCKCHAIN],
       signal,
     }),
+
+  /** Submits a bet for the connected wallet. Returns the pending on-chain tx. */
+  placeBet: (
+    marketId: number | string,
+    body: { wallet: string; outcome: number; amount: string },
+    signal?: AbortSignal
+  ) =>
+    request<{ tx_hash: string; status: string }>(
+      "POST",
+      fillPath(PLACE_BET_PATH, 'market_id', marketId),
+      { body, cacheTags: [CacheTag.BLOCKCHAIN, CacheTag.MARKETS], signal },
+    ),
 
   // Newsletter (public subscription / self-service)
   newsletterSubscribe: (body: { email: string; source?: string }, signal?: AbortSignal) =>
