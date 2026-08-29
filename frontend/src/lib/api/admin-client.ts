@@ -32,6 +32,8 @@ type HttpMethod = "GET" | "POST" | "DELETE";
  */
 const PATHS = {
   resolveMarket: "/api/v1/markets/{market_id}/resolve",
+  blockchainReplay: "/api/blockchain/replay",
+  content: "/api/v1/content",
 } satisfies Record<string, keyof paths>;
 
 // ---------------------------------------------------------------------------
@@ -356,4 +358,18 @@ export const api = {
       cacheTags: [CacheTag.EMAIL],
       signal,
     }),
+
+  blockchainReplay: (body: { from_ledger: number }, signal?: AbortSignal) =>
+    request<components['schemas']['AnyObject']>(
+      "POST",
+      PATHS.blockchainReplay,
+      { body, cacheTags: [CacheTag.BLOCKCHAIN], signal }
+    ),
+
+  saveContent: (body: Record<string, unknown>, signal?: AbortSignal) =>
+    request<components['schemas']['AnyObject']>(
+      "POST",
+      PATHS.content,
+      { body, cacheTags: [CacheTag.STATISTICS, CacheTag.MARKETS], signal }
+    ),
 };
