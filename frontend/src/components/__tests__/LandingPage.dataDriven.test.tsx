@@ -18,9 +18,9 @@ describe('LandingPage data-driven sections', () => {
     render(<LandingPage />);
     const cards = document.querySelectorAll('.feature-card');
     expect(cards).toHaveLength(3);
-    expect(screen.getByRole('heading', { name: 'Fully Decentralized' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Secure & Audited' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Lightning Fast' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Multi-outcome markets' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Hybrid oracle + community resolution' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Stellar speed, with referrals' })).toBeInTheDocument();
   });
 
   it('renders the how-it-works steps as an ordered list with one item per step', () => {

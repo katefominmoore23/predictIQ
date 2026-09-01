@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { Orbitron, Exo_2 } from 'next/font/google';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { OfflineBanner } from '../components/OfflineBanner';
+import { AxeAccessibility } from '../components/AxeAccessibility';
 import { WalletProvider } from '../lib/wallet/WalletProvider';
 import { darkModeInitScript } from '../lib/darkMode';
 import '../styles/tokens.css';
@@ -61,6 +62,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: darkModeInitScript }} />
       </head>
       <body>
+        {/* Dev-only @axe-core/react checker; tree-shaken out of prod bundles. */}
+        <AxeAccessibility />
         <OfflineBanner />
         <ErrorBoundary section="main">
           <WalletProvider>{children}</WalletProvider>

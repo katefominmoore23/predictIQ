@@ -16,8 +16,10 @@ export {
   CacheTag,
 } from './public-client';
 
-import { api as publicApi, CacheTag, fillPath } from './public-client';
+import { api as publicApi, CacheTag } from './public-client';
+import { fillPath } from './paths';
 import { apiCache, CACHE_TTL } from './cache';
+import { reportRateLimited } from './rateLimit';
 import { getEnvConfig } from '../env';
 import type { paths, components } from './schema';
 
@@ -134,13 +136,18 @@ async function request<T>(
       });
 
       clear();
+      reportResponseHeaders(res.headers);
 
       if (!res.ok) {
-        if (res.status === 429 && attempt < maxRetries) {
+        if (res.status === 429) {
           const retryAfter = res.headers.get('Retry-After');
-          const delayMs = getRetryDelay(attempt, retryAfter ? parseInt(retryAfter, 10) : undefined);
-          await sleep(delayMs);
-          continue;
+          const retryAfterSec = retryAfter ? parseInt(retryAfter, 10) : NaN;
+          reportRateLimited(Number.isNaN(retryAfterSec) ? 1 : retryAfterSec);
+          if (attempt < maxRetries) {
+            const delayMs = getRetryDelay(attempt, Number.isNaN(retryAfterSec) ? undefined : retryAfterSec);
+            await sleep(delayMs);
+            continue;
+          }
         }
 
         if (res.status >= 500 && attempt < maxRetries && (method === "GET" || options.idempotent)) {
@@ -337,7 +344,7 @@ export const api = {
     }),
 
   emailPreview: (templateName: string, signal?: AbortSignal) =>
-    request<Record<string, unknown>>("GET", `/api/v1/email/preview/${encodeURIComponent(templateName)}`, {
+    request<Record<string, unknown>>("GET", fillPath("/api/v1/email/preview/{template_name}", 'template_name', templateName), {
       cacheTtl: CACHE_TTL.LONG,
       cacheTags: [CacheTag.EMAIL],
       signal,
