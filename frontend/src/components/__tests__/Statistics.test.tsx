@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { Statistics } from '../Statistics';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { api } from '../../lib/api/public-client';
@@ -50,39 +50,97 @@ describe('Statistics', () => {
   });
 
   it('shows error state and retry button on failure', async () => {
+    jest.useFakeTimers();
     const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     mockApi.getStatistics.mockRejectedValue(new Error('Network error'));
 
     render(<Statistics />);
 
-    await waitFor(() => {
-      expect(screen.getByText(/failed to load statistics/i)).toBeInTheDocument();
+    // Fast-forward through the soft-retry backoff (#1352): failed attempts at
+    // 0s, 1s, 3s and 7s, after which the budget is exhausted and the hook
+    // surfaces a hard error state with a manual retry action.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(8000);
     });
 
+    expect(screen.getByText(/failed to load statistics/i)).toBeInTheDocument();
     expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
 
     consoleSpy.mockRestore();
+    jest.useRealTimers();
   });
 
   it('retries on button click', async () => {
+    jest.useFakeTimers();
+    // Exhaust the soft-retry budget first: initial call + 3 automatic retries
+    // all fail before the error state surfaces.
     mockApi.getStatistics
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockRejectedValueOnce(new Error('Network error'))
       .mockRejectedValueOnce(new Error('Network error'))
       .mockResolvedValueOnce({ total_markets: 100 });
 
     render(<Statistics />);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+    // Soft-retry budget exhausts after 1s + 2s + 4s of backoff, surfacing the
+    // manual retry button.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(8000);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.getByText('100')).toBeInTheDocument();
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /retry/i }));
     });
 
-    expect(mockApi.getStatistics).toHaveBeenCalledTimes(2);
+    // The manual retry succeeds on a microtask (no timers involved).
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    expect(screen.getByText('100')).toBeInTheDocument();
+    expect(mockApi.getStatistics).toHaveBeenCalledTimes(5);
+    jest.useRealTimers();
+  });
+
+  it('keeps the last data visible during a background refresh (stale-while-revalidating)', async () => {
+    jest.useFakeTimers();
+    let resolveRefresh: (value: { total_markets: number }) => void = () => {};
+    mockApi.getStatistics
+      .mockResolvedValueOnce({ total_markets: 150 })
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ total_markets: number }>((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+
+    render(<Statistics />);
+
+    // Initial fetch resolves (microtask only), showing real values.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText('150')).toBeInTheDocument();
+
+    // A background poll fires (30s interval): the grid must stay visible and
+    // the skeleton/spinner must NOT reappear while the refresh is in flight.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(screen.getByText('150')).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: /loading/i })).not.toBeInTheDocument();
+
+    // Let the in-flight refresh settle so the suite exits cleanly.
+    act(() => {
+      resolveRefresh({ total_markets: 150 });
+    });
+
+    jest.useRealTimers();
   });
 
   it('has proper accessibility attributes', () => {
