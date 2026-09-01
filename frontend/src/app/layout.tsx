@@ -26,10 +26,27 @@ const body = Exo_2({
   display: 'swap',
 });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://predictiq.app';
+
+// Site-wide metadata defaults. Per-route pages (e.g. app/page.tsx) override
+// title/description and add route-specific Open Graph data.
 export const metadata = {
-  title: 'PredictIQ — Decentralized Prediction Markets on Stellar',
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: 'PredictIQ — Decentralized Prediction Markets on Stellar',
+    template: '%s · PredictIQ',
+  },
   description:
     'Create, bet on, and resolve prediction markets with transparency, security, and fairness powered by the Stellar blockchain.',
+  applicationName: 'PredictIQ',
+  openGraph: {
+    type: 'website',
+    siteName: 'PredictIQ',
+    url: SITE_URL,
+  },
+  twitter: {
+    card: 'summary_large_image',
+  },
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
