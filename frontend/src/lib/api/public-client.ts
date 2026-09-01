@@ -48,10 +48,10 @@ const PATHS = {
  */
 const PLACE_BET_PATH = "/api/v1/blockchain/markets/{market_id}/bets";
 
-/** Fills a `{placeholder}` segment of a schema path template with an encoded value. */
-export function fillPath(template: string, placeholder: string, value: string | number): string {
-  return template.replace(`{${placeholder}}`, encodeURIComponent(value));
-}
+// Path-parameter encoding lives in ./paths. Re-exported here so existing importers of
+// `fillPath` from './public-client' keep working.
+export { fillPath, fillPathParams } from './paths';
+import { fillPath } from './paths';
 
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 3,

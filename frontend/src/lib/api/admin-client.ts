@@ -16,7 +16,8 @@ export {
   CacheTag,
 } from './public-client';
 
-import { api as publicApi, CacheTag, fillPath } from './public-client';
+import { api as publicApi, CacheTag } from './public-client';
+import { fillPath } from './paths';
 import { apiCache, CACHE_TTL } from './cache';
 import { getEnvConfig } from '../env';
 import type { paths, components } from './schema';
@@ -337,7 +338,7 @@ export const api = {
     }),
 
   emailPreview: (templateName: string, signal?: AbortSignal) =>
-    request<Record<string, unknown>>("GET", `/api/v1/email/preview/${encodeURIComponent(templateName)}`, {
+    request<Record<string, unknown>>("GET", fillPath("/api/v1/email/preview/{template_name}", 'template_name', templateName), {
       cacheTtl: CACHE_TTL.LONG,
       cacheTags: [CacheTag.EMAIL],
       signal,
