@@ -1,93 +1,70 @@
 'use client';
 
+import React, { useEffect, useState } from 'react';
+import {
+  onRateLimited,
+  rateLimitRemainingSeconds,
+} from '../../lib/api/rateLimit';
+
+// === useRateLimited hook
+
+interface RateLimitState {
+  isRateLimited: boolean;
+  secondsRemaining: number;
+}
+
 /**
- * Toast — shared design-system notification primitive (#1319).
- *
- * Mount <ToastContainer /> once near the app root (e.g. in the root
- * layout); call `toast.success(...)` / `toast.error(...)` / etc. from
- * useToast.ts anywhere — API mutation handlers included — to enqueue one.
- * Color tokens match the existing StatusAlert component's convention
- * (components/admin/Form.tsx) so success/error/warning/info read
- * consistently across both surfaces.
+ * Subscribe to the shared rate-limit cooldown. Action buttons can disable
+ * themselves while `isRateLimited` is true and re-enable at zero.
  */
+export function useRateLimited(): RateLimitState {
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(() =>
+    rateLimitRemainingSeconds(),
+  );
 
-import { toast, useToast, type ToastItem, type ToastVariant } from '../../lib/hooks/useToast';
+  useEffect(() => {
+    const unsubscribe = onRateLimited((seconds) => setSecondsRemaining(seconds));
+    return unsubscribe;
+  }, []);
 
-const COLORS: Record<ToastVariant, { bg: string; border: string; text: string }> = {
-  success: { bg: 'rgba(52, 211, 153, 0.12)', border: 'var(--success)', text: 'var(--success)' },
-  error: { bg: 'rgba(248, 113, 113, 0.12)', border: 'var(--destructive)', text: 'var(--destructive)' },
-  warning: { bg: 'rgba(251, 191, 36, 0.12)', border: 'var(--gold)', text: 'var(--gold-soft)' },
-  info: { bg: 'rgba(139, 92, 246, 0.12)', border: 'var(--purple)', text: 'var(--purple-soft)' },
+  useEffect(() => {
+    if (secondsRemaining <= 0) return;
+    const id = setInterval(() => {
+      setSecondsRemaining(rateLimitRemainingSeconds());
+    }, 1000);
+    return () => clearInterval(id);
+  }, [secondsRemaining]);
+
+  return { isRateLimited: secondsRemaining > 0, secondsRemaining };
+}
+
+// === RateLimitToast
+//
+// One persistent (non-auto-dismissing) toast for the whole app. Coalescing is
+// handled in rateLimit.ts, so mounting this once is enough - parallel 429s never
+// stack a second toast.
+
+export const RateLimitToast: React.FC = () => {
+  const { isRateLimited, secondsRemaining } = useRateLimited();
+
+  if (!isRateLimited) return null;
+
+  return (
+    <div
+      className="toast toast--rate-limit"
+      role="status"
+      aria-live="polite"
+    >
+      <p className="toast__title">You are sending requests too quickly.</p>
+      <p className="toast__body">
+        Please wait{' '}
+        <span className="toast__countdown" aria-label={`${secondsRemaining} seconds remaining`}>
+          {secondsRemaining}s
+        </span>{' '}
+        before trying again.
+      </p>
+    </div>
+  );
 };
 
-function ToastRow({ item }: { item: ToastItem }) {
-  const colors = COLORS[item.variant];
-
-  return (
-    <div
-      role={item.variant === 'error' ? 'alert' : 'status'}
-      style={{
-        backgroundColor: colors.bg,
-        border: `1px solid ${colors.border}`,
-        borderRadius: 'var(--radius-sm)',
-        padding: '0.85rem 1.15rem',
-        color: 'var(--fg)',
-        boxShadow: 'var(--shadow-sm)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '0.75rem',
-        minWidth: '280px',
-        maxWidth: '420px',
-      }}
-    >
-      <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: colors.text, lineHeight: 1.4 }}>
-        {item.message}
-      </p>
-      <button
-        type="button"
-        onClick={() => toast.dismiss(item.id)}
-        aria-label="Dismiss notification"
-        style={{
-          background: 'transparent',
-          border: 'none',
-          color: 'var(--fg-muted)',
-          cursor: 'pointer',
-          padding: '0.2rem',
-          lineHeight: 1,
-          fontSize: '1.1rem',
-          flexShrink: 0,
-        }}
-      >
-        ×
-      </button>
-    </div>
-  );
-}
-
-export function ToastContainer() {
-  const { toasts } = useToast();
-
-  return (
-    <div
-      aria-live="polite"
-      aria-atomic="false"
-      style={{
-        position: 'fixed',
-        bottom: '1.5rem',
-        right: '1.5rem',
-        zIndex: 10000,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.75rem',
-        pointerEvents: toasts.length > 0 ? 'auto' : 'none',
-      }}
-    >
-      {toasts.map((item) => (
-        <ToastRow key={item.id} item={item} />
-      ))}
-    </div>
-  );
-}
-
-export default ToastContainer;
+export default RateLimitToast;
