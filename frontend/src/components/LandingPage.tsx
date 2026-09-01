@@ -18,9 +18,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
   const { isDarkMode, toggleDarkMode } = useDarkMode();
 
   const features = [
-    { icon: '/icons/decentralized.svg', title: t('features.decentralized.title'), description: t('features.decentralized.description') },
-    { icon: '/icons/secure.svg', title: t('features.secure.title'), description: t('features.secure.description') },
-    { icon: '/icons/fast.svg', title: t('features.fast.title'), description: t('features.fast.description') },
+    { icon: '/icons/decentralized.svg', title: t('features.decentralized.title'), description: t('features.decentralized.description'), href: '/markets' },
+    { icon: '/icons/secure.svg', title: t('features.secure.title'), description: t('features.secure.description'), href: '/markets' },
+    { icon: '/icons/fast.svg', title: t('features.fast.title'), description: t('features.fast.description'), href: '/markets' },
   ];
 
   const steps = [
@@ -117,8 +117,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ className }) => {
           <p className="hero-description">
             {t('hero.description')}
           </p>
-          
-          {/* CTA Form */}
+
+          {/* Primary CTAs into the live product. Plain links (not the newsletter
+              form) so the hero works with JS pending and needs no client state. */}
+          <div className="hero-cta-group">
+            <a href="/markets" className="hero-cta hero-cta--primary">
+              {t('hero.primaryCta')}
+            </a>
+            <a href="#how-it-works" className="hero-cta hero-cta--secondary">
+              {t('hero.secondaryCta')}
+            </a>
+          </div>
+
+          {/* Early-access signup */}
           <NewsletterSignup />
         </section>
 

@@ -136,6 +136,7 @@ async function request<T>(
       });
 
       clear();
+      reportResponseHeaders(res.headers);
 
       if (!res.ok) {
         if (res.status === 429) {
