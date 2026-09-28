@@ -12,6 +12,7 @@ use crate::email::service::idempotency_key;
 use crate::email::types::{EmailJobStatus, EmailJobType};
 use crate::metrics::Metrics;
 use crate::shutdown::ShutdownCoordinator;
+use crate::batch_53_implementations::RequeueResult;
 
 const EMAIL_QUEUE_KEY: &str = "email:queue";
 const EMAIL_PROCESSING_KEY: &str = "email:processing";
@@ -362,8 +363,31 @@ impl EmailQueue {
     /// The job is scheduled `DEAD_LETTER_REQUEUE_DELAY_SECS` seconds in the future
     /// so a persistent failure does not cause a tight retry loop. The attempts counter
     /// is also reset to 0 so the job gets its full retry budget again.
-    pub async fn requeue_dead_letter(&self, job_id: Uuid) -> Result<bool> {
+    ///
+    /// Returns RequeueResult to distinguish:
+    /// - Success: job was in dead_letter and has been requeued
+    /// - NotFound: job does not exist in the system
+    /// - NotInDeadLetter: job exists but is not in dead_letter status (already requeued/completed)
+    pub async fn requeue_dead_letter(&self, job_id: Uuid) -> Result<RequeueResult> {
         let mut conn = self.cache.get_connection().await?;
+
+        // Check if job exists and its current status
+        let job = self.db.email_get_job(job_id).await?;
+        let job = match job {
+            Some(j) => j,
+            None => return Ok(RequeueResult::NotFound),
+        };
+
+        // Verify job is in dead_letter status
+        let current_status = job.status.as_str();
+        if current_status != "dead_letter" {
+            tracing::warn!(
+                job_id = %job_id,
+                current_status = %current_status,
+                "Attempted to requeue job not in dead_letter status"
+            );
+            return Ok(RequeueResult::NotInDeadLetter);
+        }
 
         let removed: usize = conn
             .zrem(EMAIL_DEAD_LETTER_KEY, job_id.to_string())
@@ -371,7 +395,12 @@ impl EmailQueue {
             .context("Failed to remove job from dead-letter set")?;
 
         if removed == 0 {
-            return Ok(false);
+            // This shouldn't happen if the DB check passed, but handle it defensively
+            tracing::warn!(
+                job_id = %job_id,
+                "Job not found in Redis dead-letter set despite DB check"
+            );
+            return Ok(RequeueResult::NotInDeadLetter);
         }
 
         // Reset attempts to 0 so the job gets its full retry budget.
@@ -405,7 +434,7 @@ impl EmailQueue {
             delay_secs = Self::DEAD_LETTER_REQUEUE_DELAY_SECS,
             "Requeued dead-letter email job with cooling-off delay"
         );
-        Ok(true)
+        Ok(RequeueResult::Success)
     }
 
     /// Get queue statistics

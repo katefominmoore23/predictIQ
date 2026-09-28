@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::ValidateEmail;
 
-use crate::{blockchain::HealthStatus, cache::{keys, InvalidationTag}, db::DbError, email::webhook::sendgrid_webhook_handler, pagination::{PaginatedResponse, PaginationQuery}, body_redact, AppState};
+use crate::{blockchain::HealthStatus, cache::{keys, InvalidationTag}, db::DbError, email::webhook::sendgrid_webhook_handler, pagination::{PaginatedResponse, PaginationQuery}, body_redact, AppState, batch_53_implementations::RequeueResult};
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ApiError {
@@ -1636,16 +1636,25 @@ pub async fn email_dead_letter_requeue(
     State(state): State<Arc<AppState>>,
     Path(job_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let requeued = state
+    let result = state
         .email_queue
         .requeue_dead_letter(job_id)
         .await
         .map_err(into_api_error)?;
 
-    if requeued {
-        Ok((StatusCode::OK, Json(serde_json::json!({ "requeued": true, "job_id": job_id }))))
-    } else {
-        Err(ApiError::not_found(format!("Job {job_id} not found in dead-letter set")))
+    match result {
+        RequeueResult::Success => {
+            Ok((StatusCode::OK, Json(serde_json::json!({ "requeued": true, "job_id": job_id }))))
+        }
+        RequeueResult::NotFound => {
+            Err(ApiError::not_found(format!("Job {job_id} not found")))
+        }
+        RequeueResult::NotInDeadLetter => {
+            Err(ApiError::conflict(format!(
+                "Job {job_id} is not in dead-letter status and cannot be requeued. \
+                 It may have already been requeued or completed."
+            )))
+        }
     }
 }
 

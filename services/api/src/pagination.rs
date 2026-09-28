@@ -68,6 +68,15 @@ pub fn validate_pagination(params: PaginationParams) -> Result<ValidatedPaginati
         });
     }
 
+    // Check for mutually exclusive pagination strategies
+    if params.offset.is_some() && params.cursor.is_some() {
+        return Err(PaginationError {
+            error:     "pagination_conflict",
+            message:   "offset and cursor are mutually exclusive: use one pagination strategy at a time.".to_string(),
+            max_limit: MAX_PAGE_LIMIT,
+        });
+    }
+
     if let Some(cursor) = &params.cursor {
         if !cursor.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '=' | '+' | '/')) {
             return Err(PaginationError {
@@ -294,5 +303,54 @@ mod tests {
         };
         let resp = err.into_response();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn offset_and_cursor_together_rejected() {
+        let params = PaginationParams {
+            limit: None,
+            cursor: Some("abc123".to_string()),
+            offset: Some(10),
+        };
+        let err = validate_pagination(params).unwrap_err();
+        assert_eq!(err.error, "pagination_conflict");
+        assert!(err.message.to_lowercase().contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn offset_alone_accepted() {
+        let params = PaginationParams {
+            limit: None,
+            cursor: None,
+            offset: Some(10),
+        };
+        let v = validate_pagination(params).unwrap();
+        assert_eq!(v.offset, 10);
+        assert!(v.cursor.is_none());
+    }
+
+    #[test]
+    fn cursor_alone_accepted() {
+        let params = PaginationParams {
+            limit: None,
+            cursor: Some("abc123".to_string()),
+            offset: None,
+        };
+        let v = validate_pagination(params).unwrap();
+        assert_eq!(v.cursor.as_deref(), Some("abc123"));
+        assert_eq!(v.offset, 0);
+    }
+
+    #[test]
+    fn neither_offset_nor_cursor_uses_defaults() {
+        let params = PaginationParams {
+            limit: None,
+            cursor: None,
+            offset: None,
+        };
+        let v = validate_pagination(params).unwrap();
+        assert_eq!(v.limit, DEFAULT_LIMIT);
+        assert!(v.cursor.is_none());
+        assert_eq!(v.offset, 0);
     }
 }
