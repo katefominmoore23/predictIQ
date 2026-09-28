@@ -1228,15 +1228,41 @@ impl BlockchainClient {
     /// Load non-expired pending watched transactions from the database into the in-memory map.
     /// Call once on startup before spawning background workers.
     pub async fn load_watched_transactions(&self) -> anyhow::Result<()> {
+        const MAX_WATCHED_TX_RESTORE: usize = 50_000;
+
         let pending = self.db.watched_tx_load_pending().await?;
         let count = pending.len();
+
         if count > 0 {
             let mut set = self.monitor.watched_txs.write().await;
             let now = Instant::now();
-            for tx_hash in pending {
-                set.entry(tx_hash).or_insert(now);
+
+            // Bound the restore to prevent memory exhaustion at startup
+            let to_restore = std::cmp::min(count, MAX_WATCHED_TX_RESTORE);
+            let skipped = count.saturating_sub(MAX_WATCHED_TX_RESTORE);
+
+            for tx_hash in pending.iter().take(to_restore) {
+                set.entry(tx_hash.clone()).or_insert(now);
             }
-            tracing::info!(count, "restored watched transactions from database");
+
+            if skipped > 0 {
+                tracing::warn!(
+                    restored = to_restore,
+                    skipped = skipped,
+                    total = count,
+                    max_restore = MAX_WATCHED_TX_RESTORE,
+                    "watched_txs table has {} rows, restored {} (warning: skipped {} transactions due to startup memory bound)",
+                    count, to_restore, skipped
+                );
+            } else {
+                tracing::info!(
+                    count = to_restore,
+                    "restored watched transactions from database"
+                );
+            }
+
+            // Record startup metric
+            self.metrics.set_watched_tx_count(to_restore as i64);
         }
         Ok(())
     }
